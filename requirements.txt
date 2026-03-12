@@ -1,1 +1,2 @@
-streamlit
+streamlitpython-docx
+requests
