@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from docx import Document
 from datetime import date
@@ -15,7 +16,6 @@ HEADERS = {
 
 def get_next_offer_number():
     year_2digit = date.today().strftime('%y')
-    # Count existing offers this year
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/offerte",
         headers=HEADERS,
@@ -108,9 +108,12 @@ if st.button("📥 Generate Offerta", type="primary", use_container_width=True):
         }
 
         try:
-            doc = Document("/workspaces/blank-app/offerta_template.docx")
-        except:
-            st.error("❌ Template not found.")
+            template_path = os.path.join(os.path.dirname(__file__), "offerta_template.docx")
+            st.write("🔍 Looking for template at:", template_path)
+            st.write("📁 Files in directory:", os.listdir(os.path.dirname(__file__)))
+            doc = Document(template_path)
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
             st.stop()
 
         for para in doc.paragraphs:
@@ -126,7 +129,6 @@ if st.button("📥 Generate Offerta", type="primary", use_container_width=True):
         doc.save(buffer)
         buffer.seek(0)
 
-        # Save to Supabase
         save_offerta(offer_number, company)
 
         st.success(f"✅ Offerta {offer_number} ready!")
