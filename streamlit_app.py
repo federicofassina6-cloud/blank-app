@@ -109,8 +109,6 @@ if st.button("📥 Generate Offerta", type="primary", use_container_width=True):
 
         try:
             template_path = os.path.join(os.path.dirname(__file__), "offerta_template.docx")
-            st.write("🔍 Looking for template at:", template_path)
-            st.write("📁 Files in directory:", os.listdir(os.path.dirname(__file__)))
             doc = Document(template_path)
         except Exception as e:
             st.error(f"❌ Error: {e}")
