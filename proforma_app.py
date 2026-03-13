@@ -2,6 +2,9 @@ import os
 import copy
 import streamlit as st
 from docx import Document
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+from docx.shared import Pt
 from datetime import date
 import io
 import requests
@@ -69,7 +72,7 @@ PRODUCTS = [
     {"description": "FRONT SIDE SEAL (white plastic dam)", "unit_price": 34.0},
     {"description": "RH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
     {"description": "LH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
-    {"description": "Split pins float valve 510/2 heavy, brass seat diam. 5 mm rod length 200 mm with 1/4 W thread, long type (FARG)", "unit_price": 5.5},
+    {"description": "Split pins float valve 510/2 heavy, brass seat diam. 5 mm rod length 200 mm with 1/4 W thread (FARG)", "unit_price": 5.5},
     {"description": "Float valve in plastic with ball (FARG)", "unit_price": 0.5},
     {"description": "Motovario gearbox NMRV-P 063 7.5:1 PAM 120/19 slow shaft D25", "unit_price": 430.0},
     {"description": "Packing charges", "unit_price": 450.0},
@@ -84,7 +87,8 @@ PRODUCT_NAMES = ["— custom —"] + [
     for p in PRODUCTS
 ]
 
-CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CNY", "JPY"]
+CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CNY", "RUB", "— custom —"]
+
 HS_CODES = ["84.66.9195", "84.79.8998", "84.48.5900", "84.77.9000", "39.26.3000", "84.73.3000"]
 PAYMENT_OPTIONS = [
     "In advance by T/t transfer",
@@ -126,6 +130,7 @@ SHIPMENT_OPTIONS = [
 # DOCX HELPERS
 # ─────────────────────────────────────────────
 def replace_in_paragraph(para, replacements):
+    """Replace placeholders while preserving run formatting."""
     full_text = "".join(run.text for run in para.runs)
     changed = False
     for key, val in replacements.items():
@@ -137,14 +142,63 @@ def replace_in_paragraph(para, replacements):
         for run in para.runs[1:]:
             run.text = ""
 
-def set_cell_text(cell, text):
+def set_cell_text(cell, text, bold=False, italic=False, font_name=None, font_size=None):
+    """Clear cell and write text with explicit formatting."""
     for para in cell.paragraphs:
         for run in para.runs:
             run.text = ""
-    if cell.paragraphs[0].runs:
-        cell.paragraphs[0].runs[0].text = text
+    para = cell.paragraphs[0]
+    if para.runs:
+        run = para.runs[0]
     else:
-        cell.paragraphs[0].add_run(text)
+        run = para.add_run()
+    run.text = text
+    run.bold = bold
+    run.italic = italic
+    if font_name:
+        run.font.name = font_name
+    if font_size:
+        run.font.size = Pt(font_size)
+
+def remove_row_borders(row):
+    """Remove all borders from a table row's cells."""
+    for cell in row.cells:
+        tc = cell._tc
+        tcPr = tc.find(qn('w:tcPr'))
+        if tcPr is None:
+            tcPr = OxmlElement('w:tcPr')
+            tc.insert(0, tcPr)
+        # Remove existing borders element if any
+        existing = tcPr.find(qn('w:tcBorders'))
+        if existing is not None:
+            tcPr.remove(existing)
+        # Add new borders element with all nil
+        tcBorders = OxmlElement('w:tcBorders')
+        for side in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+            border = OxmlElement(f'w:{side}')
+            border.set(qn('w:val'), 'nil')
+            tcBorders.append(border)
+        tcPr.append(tcBorders)
+
+def remove_bottom_border_from_row(row):
+    """Remove only the bottom border from all cells in a row."""
+    for cell in row.cells:
+        tc = cell._tc
+        tcPr = tc.find(qn('w:tcPr'))
+        if tcPr is None:
+            tcPr = OxmlElement('w:tcPr')
+            tc.insert(0, tcPr)
+        existing = tcPr.find(qn('w:tcBorders'))
+        if existing is None:
+            existing = OxmlElement('w:tcBorders')
+            tcPr.append(existing)
+        # Set bottom to nil
+        bottom = existing.find(qn('w:bottom'))
+        if bottom is not None:
+            existing.remove(bottom)
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'nil')
+        existing.append(bottom)
 
 # ─────────────────────────────────────────────
 # SESSION STATE
@@ -175,6 +229,7 @@ with col_d2:
     st.metric("Proforma Number", proforma_number)
 
 year_2digit = selected_date.strftime('%y')
+# Curly apostrophe \u2019 to match template exactly
 formatted_date = selected_date.strftime('%d/%m/') + "\u2019" + year_2digit
 
 # ── 2. CLIENT ──
@@ -200,7 +255,11 @@ country = st.text_input("Country", placeholder="e.g. China")
 
 # ── 3. CURRENCY ──
 st.subheader("3. Currency")
-currency = st.selectbox("Currency (ISO)", CURRENCIES)
+currency_choice = st.selectbox("Currency (ISO)", CURRENCIES)
+if currency_choice == "— custom —":
+    currency = st.text_input("Enter ISO currency code", placeholder="e.g. AED, BRL, INR")
+else:
+    currency = currency_choice
 
 # ── 4. LINE ITEMS ──
 st.subheader("4. Line Items")
@@ -309,6 +368,7 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         if region:
             zip_city += f", {region}"
 
+        # Use curly apostrophe to match template
         header_replacements = {
             f"Schio, [DD/MM/\u2019YY]": f"Schio, {formatted_date}",
             f"[DD/MM/\u2019YY]": formatted_date,
@@ -328,48 +388,63 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
             st.error(f"❌ Template not found: {e}")
             st.stop()
 
+        # Replace header paragraphs (preserves bold/italic from template)
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
         # ── Product table (Table 0) ──
         table = doc.tables[0]
 
-        # Remove all rows except header
+        # Remove all rows except header row
         while len(table.rows) > 1:
             tr = table.rows[-1]._tr
             tr.getparent().remove(tr)
 
+        # Add line item rows
         valid_items = [it for it in st.session_state.line_items if it["description"].strip()]
         for idx, item in enumerate(valid_items):
             pos = (idx + 1) * 10
             line_total = item["qty"] * item["unit_price"]
+
             new_tr = copy.deepcopy(table.rows[0]._tr)
             table._tbl.append(new_tr)
-            cells = table.rows[-1].cells
+            new_row = table.rows[-1]
 
             qty_str = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             total_str = f"{line_total:,.0f},-".replace(",", ".")
 
-            set_cell_text(cells[0], str(pos))
-            set_cell_text(cells[1], item["description"])
-            set_cell_text(cells[2], qty_str)
-            set_cell_text(cells[3], price_str)
-            set_cell_text(cells[4], currency)
-            set_cell_text(cells[5], total_str)
+            cells = new_row.cells
+            # pos, description, qty, price — not bold, not italic
+            set_cell_text(cells[0], str(pos),   bold=False, italic=False)
+            set_cell_text(cells[1], item["description"], bold=False, italic=False)
+            set_cell_text(cells[2], qty_str,    bold=False, italic=False)
+            set_cell_text(cells[3], price_str,  bold=False, italic=False)
+            # ISO currency: Verdana 10, not italic
+            set_cell_text(cells[4], currency,   bold=False, italic=False, font_name="Verdana", font_size=10)
+            set_cell_text(cells[5], total_str,  bold=False, italic=False)
 
-        # Total row
+            # No borders on data rows
+            remove_row_borders(new_row)
+
+        # Add total row — bold, not italic, no bottom border
         new_tr = copy.deepcopy(table.rows[0]._tr)
         table._tbl.append(new_tr)
-        tcells = table.rows[-1].cells
+        total_row = table.rows[-1]
+        tcells = total_row.cells
         total_str = f"{grand_total:,.0f},-".replace(",", ".")
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
-        set_cell_text(tcells[0], total_label)
-        set_cell_text(tcells[1], "")
-        set_cell_text(tcells[2], "")
-        set_cell_text(tcells[3], "")
-        set_cell_text(tcells[4], currency)
-        set_cell_text(tcells[5], total_str)
+
+        set_cell_text(tcells[0], total_label, bold=True, italic=False)
+        set_cell_text(tcells[1], "",          bold=True, italic=False)
+        set_cell_text(tcells[2], "",          bold=True, italic=False)
+        set_cell_text(tcells[3], "",          bold=True, italic=False)
+        set_cell_text(tcells[4], currency,    bold=True, italic=False, font_name="Verdana", font_size=10)
+        set_cell_text(tcells[5], total_str,   bold=True, italic=False)
+
+        # Remove all borders from total row, then also explicitly no bottom border
+        remove_row_borders(total_row)
+        remove_bottom_border_from_row(total_row)
 
         # ── Terms table (Table 1) ──
         terms_table = doc.tables[1]
@@ -383,12 +458,14 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         }
         for row_idx, value in terms_map.items():
             if row_idx < len(terms_table.rows):
-                set_cell_text(terms_table.rows[row_idx].cells[1], value)
+                set_cell_text(terms_table.rows[row_idx].cells[1], value, bold=False, italic=False)
 
+        # Save to buffer
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
 
+        # Save to Supabase
         save_proforma(proforma_number, company, grand_total, currency)
 
         st.success(f"✅ Proforma {proforma_number} ready! Total: {currency} {grand_total:,.2f}")
