@@ -350,12 +350,15 @@ for i, item in enumerate(st.session_state.line_items):
                     item["description"]    = p["description"]
                     item["price_client"]   = float(p.get("unit_price_client")   or 0)
                     item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
-                    item["unit_price"]     = item["price_client"] if item.get("price_type", "Cliente") == "Cliente" else item["price_reseller"]
+                    new_price = item["price_client"] if item.get("price_type", "Cliente") == "Cliente" else item["price_reseller"]
+                    item["unit_price"] = new_price
+                    st.session_state[f"price_{i}"] = new_price  # force widget to update
                 else:
                     item["description"]    = ""
                     item["unit_price"]     = 0.0
                     item["price_client"]   = 0.0
                     item["price_reseller"] = 0.0
+                    st.session_state[f"price_{i}"] = 0.0
                 needs_rerun = True
 
             if prod_idx == 0:
@@ -384,7 +387,9 @@ for i, item in enumerate(st.session_state.line_items):
                 )
                 if price_type != item.get("price_type"):
                     item["price_type"] = price_type
-                    item["unit_price"] = item.get("price_client", 0.0) if price_type == "Cliente" else item.get("price_reseller", 0.0)
+                    new_price = item.get("price_client", 0.0) if price_type == "Cliente" else item.get("price_reseller", 0.0)
+                    item["unit_price"] = new_price
+                    st.session_state[f"price_{i}"] = new_price  # force widget to update
                     needs_rerun = True
 
         with c2:
@@ -393,6 +398,9 @@ for i, item in enumerate(st.session_state.line_items):
                 step=1.0, format="%.2f", key=f"qty_{i}"
             )
         with c3:
+            # Sync item unit_price from widget state if it was changed by user
+            if f"price_{i}" in st.session_state:
+                item["unit_price"] = float(st.session_state[f"price_{i}"])
             item["unit_price"] = st.number_input(
                 f"Unit Price ({currency})", min_value=0.0,
                 value=float(item["unit_price"]), step=0.01,
