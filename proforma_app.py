@@ -327,6 +327,7 @@ st.subheader("4. Line Items")
 st.caption("Select from catalogue or choose '— custom —' to type manually.")
 
 items_to_remove = []
+needs_rerun = False
 for i, item in enumerate(st.session_state.line_items):
     with st.container():
         c1, c2, c3, c4 = st.columns([3, 1.5, 1.5, 0.4])
@@ -346,17 +347,16 @@ for i, item in enumerate(st.session_state.line_items):
                 item["product_idx"] = prod_idx
                 if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                     p = PRODUCT_MAP[prod_idx]
-                    item["description"] = p["description"]
-                    pc = float(p.get("unit_price_client") or 0)
-                    pr = float(p.get("unit_price_reseller") or 0)
-                    item["unit_price"] = pc if item["price_type"] == "Cliente" else pr
-                    item["price_client"] = pc
-                    item["price_reseller"] = pr
+                    item["description"]    = p["description"]
+                    item["price_client"]   = float(p.get("unit_price_client")   or 0)
+                    item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
+                    item["unit_price"]     = item["price_client"] if item.get("price_type", "Cliente") == "Cliente" else item["price_reseller"]
                 else:
-                    item["description"] = ""
-                    item["unit_price"] = 0.0
-                    item["price_client"] = 0.0
+                    item["description"]    = ""
+                    item["unit_price"]     = 0.0
+                    item["price_client"]   = 0.0
                     item["price_reseller"] = 0.0
+                needs_rerun = True
 
             if prod_idx == 0:
                 item["description"] = st.text_input(
@@ -384,10 +384,8 @@ for i, item in enumerate(st.session_state.line_items):
                 )
                 if price_type != item.get("price_type"):
                     item["price_type"] = price_type
-                    p = PRODUCT_MAP[prod_idx]
-                    pc = float(p.get("unit_price_client") or 0)
-                    pr = float(p.get("unit_price_reseller") or 0)
-                    item["unit_price"] = pc if price_type == "Cliente" else pr
+                    item["unit_price"] = item.get("price_client", 0.0) if price_type == "Cliente" else item.get("price_reseller", 0.0)
+                    needs_rerun = True
 
         with c2:
             item["qty"] = st.number_input(
@@ -412,7 +410,7 @@ for i, item in enumerate(st.session_state.line_items):
 
 for i in sorted(items_to_remove, reverse=True):
     st.session_state.line_items.pop(i)
-if items_to_remove:
+if items_to_remove or needs_rerun:
     st.rerun()
 
 st.button("➕ Add Line Item", on_click=add_line)
