@@ -474,11 +474,16 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
 
             # Description cell: bold product name line 1, normal details line 2
             desc_cell = cells[1]
-            # Clear all existing paragraphs content
+            # Clear all paragraph and run level formatting from deepcopy
             for para in desc_cell.paragraphs:
+                # Clear paragraph-level rPr (can inherit italic from header)
+                pPr = para._p.find(qn('w:pPr'))
+                if pPr is not None:
+                    rPr_in_pPr = pPr.find(qn('w:rPr'))
+                    if rPr_in_pPr is not None:
+                        pPr.remove(rPr_in_pPr)
                 for run in para.runs:
                     run.text = ""
-                    # Clear all run XML properties so no inherited italic/bold
                     rPr = run._r.find(qn('w:rPr'))
                     if rPr is not None:
                         run._r.remove(rPr)
@@ -524,10 +529,10 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         total_str = f"{int(round(grand_total)):,}".replace(",", ".") + ",-"
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
 
-        set_cell_text(tcells[0], total_label, bold=True, italic=False)
-        set_cell_text(tcells[1], "",          bold=True, italic=False)
-        set_cell_text(tcells[2], "",          bold=True, italic=False)
-        set_cell_text(tcells[3], "",          bold=True, italic=False)
+        set_cell_text(tcells[0], "",           bold=True, italic=False)
+        set_cell_text(tcells[1], total_label,  bold=True, italic=False)
+        set_cell_text(tcells[2], "",           bold=True, italic=False)
+        set_cell_text(tcells[3], "",           bold=True, italic=False)
         set_cell_text(tcells[4], currency,    bold=True, italic=False, font_name="Verdana", font_size=10)
         set_cell_text(tcells[5], total_str,   bold=True, italic=False)
 
