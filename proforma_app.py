@@ -10,6 +10,25 @@ import io
 import requests
 
 # ─────────────────────────────────────────────
+# PASSWORD GATE
+# ─────────────────────────────────────────────
+st.set_page_config(page_title="Proforma Generator", layout="wide")
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 Proforma Generator")
+    pwd = st.text_input("Enter passcode to continue:", type="password")
+    if st.button("Login"):
+        if pwd == "RAINYEAR":
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("❌ Wrong passcode.")
+    st.stop()
+
+# ─────────────────────────────────────────────
 # SUPABASE
 # ─────────────────────────────────────────────
 SUPABASE_URL = "https://lztrggttkgvgjouofibd.supabase.co"
@@ -51,45 +70,79 @@ def save_proforma(proforma_number, client_company, total_amount, currency):
         }
     )
 
+def load_products():
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/products",
+        headers=HEADERS,
+        params={
+            "select": "id,description,unit_price_client,unit_price_reseller,category",
+            "order": "category.asc,created_at.asc"
+        }
+    )
+    try:
+        data = response.json()
+        if isinstance(data, list):
+            return data
+    except:
+        pass
+    return []
+
+def save_product(description, unit_price_client, unit_price_reseller, category):
+    response = requests.post(
+        f"{SUPABASE_URL}/rest/v1/products",
+        headers=HEADERS,
+        json={
+            "description": description,
+            "unit_price_client": unit_price_client,
+            "unit_price_reseller": unit_price_reseller,
+            "category": category
+        }
+    )
+    return response.status_code in [200, 201]
+
+# ─────────────────────────────────────────────
+# LOAD PRODUCTS FROM SUPABASE
+# ─────────────────────────────────────────────
+if "products_db" not in st.session_state:
+    st.session_state.products_db = load_products()
+
+PRODUCTS = st.session_state.products_db
+
+# Group by category for display
+CATEGORIES = []
+seen_cats = []
+for p in PRODUCTS:
+    cat = p.get("category") or "Other"
+    if cat not in seen_cats:
+        seen_cats.append(cat)
+        CATEGORIES.append(cat)
+
+# Build flat dropdown list with category separators
+PRODUCT_OPTIONS = []   # list of dicts: {label, product_idx or None}
+PRODUCT_NAMES   = ["— custom —"]
+PRODUCT_MAP     = {}   # index in PRODUCT_NAMES → product dict
+
+for cat in CATEGORIES:
+    cat_products = [p for p in PRODUCTS if (p.get("category") or "Other") == cat]
+    PRODUCT_NAMES.append(f"── {cat} ──")   # separator (not selectable)
+    for p in cat_products:
+        label = p["description"][:65] + ("…" if len(p["description"]) > 65 else "")
+        PRODUCT_MAP[len(PRODUCT_NAMES)] = p
+        PRODUCT_NAMES.append(label)
+
 # ─────────────────────────────────────────────
 # CATALOGUES
 # ─────────────────────────────────────────────
-PRODUCTS = [
-    {"description": "CHROMED STEEL ENGRAVED ROLLER WW1300 with positive pattern for reverse rotation. Engraving 20C", "unit_price": 1750.0},
-    {"description": "HARD RUBBER POSITIVE SLEEVE WW 300 for reverse rotation. Engraving type: 20C", "unit_price": 900.0},
-    {"description": "HARD RUBBER POSITIVE SLEEVE WW 1300 for reverse rotation. Engraving type: 20C", "unit_price": 2150.0},
-    {"description": "HARD RUBBER POSITIVE SLEEVE WW 2600 for reverse rotation. Engraving type: 20C", "unit_price": 3700.0},
-    {"description": "HARD RUBBER POSITIVE SLEEVE WW 2600 for reverse rotation. Engraving type: 30CC for etching", "unit_price": 3700.0},
-    {"description": "AIR MANDREL WW 300", "unit_price": 900.0},
-    {"description": "AIR MANDREL WW 1300", "unit_price": 2500.0},
-    {"description": "AIR MANDREL WW 2600", "unit_price": 4500.0},
-    {"description": "STEEL DOCTOR BLADE WW300, dimensions 439x55x1,5 mm. with 30° bevelling", "unit_price": 48.0},
-    {"description": "COMPOSITE MATERIAL (PLASTIC) DOCTOR BLADE WW1300, dimensions 1.384x57x0,9 mm.", "unit_price": 67.0},
-    {"description": "COMPOSITE MATERIAL (PLASTIC) DOCTOR BLADE WW2600, dimensions 2.684x57x0,9 mm.", "unit_price": 110.0},
-    {"description": "Complete doctor blade holder WW 1300", "unit_price": 1300.0},
-    {"description": "Complete doctor blade holder WW 2600", "unit_price": 2100.0},
-    {"description": "SIDE SEAL (green plastic dam)", "unit_price": 105.0},
-    {"description": "FRONT SIDE SEAL (white plastic dam)", "unit_price": 34.0},
-    {"description": "RH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
-    {"description": "LH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
-    {"description": "Split pins float valve 510/2 heavy, brass seat diam. 5 mm rod length 200 mm with 1/4 W thread (FARG)", "unit_price": 5.5},
-    {"description": "Float valve in plastic with ball (FARG)", "unit_price": 0.5},
-    {"description": "Motovario gearbox NMRV-P 063 7.5:1 PAM 120/19 slow shaft D25", "unit_price": 430.0},
-    {"description": "Packing charges", "unit_price": 450.0},
-    {"description": "CIF SZX airport charges", "unit_price": 1200.0},
-    {"description": "Packing and DAP charges", "unit_price": 130.0},
-    {"description": "Frame Tinter spares kit (section header, price=0)", "unit_price": 0.0},
-    {"description": "Tinter 1300 spares kit (section header, price=0)", "unit_price": 0.0},
-    {"description": "Tinter 2600 spares kit (section header, price=0)", "unit_price": 0.0},
-]
-PRODUCT_NAMES = ["— custom —"] + [
-    p["description"][:65] + ("…" if len(p["description"]) > 65 else "")
-    for p in PRODUCTS
-]
-
 CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CNY", "RUB", "— custom —"]
 
-HS_CODES = ["84.66.9195", "84.79.8998", "84.48.5900", "84.77.9000", "39.26.3000", "84.73.3000"]
+HS_CODES = [
+    "8453.9000",
+    "8453.1000",
+    "8466.9195",
+    "8464.2019",
+    "8451.9000",
+    "8451.8030",
+]
 PAYMENT_OPTIONS = [
     "In advance by T/t transfer",
     "100% by T/T transfer at the order",
@@ -130,19 +183,15 @@ SHIPMENT_OPTIONS = [
 # DOCX HELPERS
 # ─────────────────────────────────────────────
 def replace_in_paragraph(para, replacements):
-    """Replace placeholders, preserving the formatting of the run that held the placeholder."""
     for key, val in replacements.items():
-        # Find which run contains the key
         full_text = "".join(run.text for run in para.runs)
         if key not in full_text:
             continue
-        # Find the run that contains (or starts) the placeholder
         keeper_run = None
         for run in para.runs:
             if key in run.text or (run.text and run.text in key):
                 keeper_run = run
                 break
-        # If not found in a single run, find the bold one or last non-empty
         if keeper_run is None:
             for run in para.runs:
                 if run.bold:
@@ -150,11 +199,9 @@ def replace_in_paragraph(para, replacements):
                     break
         if keeper_run is None and para.runs:
             keeper_run = para.runs[-1]
-        # Merge all runs into keeper_run with replacement applied
         new_text = full_text.replace(key, val)
         if para.runs:
             para.runs[0].text = new_text
-            # Copy formatting from keeper_run to runs[0]
             if keeper_run and keeper_run != para.runs[0]:
                 para.runs[0].bold = keeper_run.bold
                 para.runs[0].italic = keeper_run.italic
@@ -166,7 +213,6 @@ def replace_in_paragraph(para, replacements):
                 run.text = ""
 
 def set_cell_text(cell, text, bold=False, italic=False, font_name="Verdana", font_size=10):
-    """Clear cell and write text with explicit formatting. Defaults to Verdana 10."""
     for para in cell.paragraphs:
         for run in para.runs:
             run.text = ""
@@ -180,63 +226,59 @@ def set_cell_text(cell, text, bold=False, italic=False, font_name="Verdana", fon
     run.font.name = font_name
     run.font.size = Pt(font_size)
 
-def remove_row_borders(row):
-    """Remove all borders from a table row's cells."""
-    for cell in row.cells:
-        tc = cell._tc
-        tcPr = tc.find(qn('w:tcPr'))
-        if tcPr is None:
-            tcPr = OxmlElement('w:tcPr')
-            tc.insert(0, tcPr)
-        # Remove existing borders element if any
-        existing = tcPr.find(qn('w:tcBorders'))
-        if existing is not None:
-            tcPr.remove(existing)
-        # Add new borders element with all nil
-        tcBorders = OxmlElement('w:tcBorders')
-        for side in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
-            border = OxmlElement(f'w:{side}')
-            border.set(qn('w:val'), 'nil')
-            tcBorders.append(border)
-        tcPr.append(tcBorders)
+def set_cell_borders(cell, top_val='nil', bottom_val='nil', left_val='nil', right_val='nil', top_double=False):
+    tc = cell._tc
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        tc.insert(0, tcPr)
+    existing = tcPr.find(qn('w:tcBorders'))
+    if existing is not None:
+        tcPr.remove(existing)
+    tcBorders = OxmlElement('w:tcBorders')
+    for side, val in [('top', top_val), ('left', left_val), ('bottom', bottom_val), ('right', right_val)]:
+        b = OxmlElement(f'w:{side}')
+        if side == 'top' and top_double:
+            b.set(qn('w:val'), 'double')
+            b.set(qn('w:sz'), '6')
+            b.set(qn('w:space'), '0')
+            b.set(qn('w:color'), 'auto')
+        else:
+            b.set(qn('w:val'), val)
+        tcBorders.append(b)
+    tcPr.append(tcBorders)
 
-def remove_bottom_border_from_row(row):
-    """Remove only the bottom border from all cells in a row."""
+def remove_row_borders(row):
     for cell in row.cells:
-        tc = cell._tc
-        tcPr = tc.find(qn('w:tcPr'))
-        if tcPr is None:
-            tcPr = OxmlElement('w:tcPr')
-            tc.insert(0, tcPr)
-        existing = tcPr.find(qn('w:tcBorders'))
-        if existing is None:
-            existing = OxmlElement('w:tcBorders')
-            tcPr.append(existing)
-        # Set bottom to nil
-        bottom = existing.find(qn('w:bottom'))
-        if bottom is not None:
-            existing.remove(bottom)
-        bottom = OxmlElement('w:bottom')
-        bottom.set(qn('w:val'), 'nil')
-        existing.append(bottom)
+        set_cell_borders(cell)
+
+def add_no_wrap(cell):
+    tc = cell._tc
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is None:
+        tcPr = OxmlElement('w:tcPr')
+        tc.insert(0, tcPr)
+    noWrap = OxmlElement('w:noWrap')
+    tcPr.append(noWrap)
 
 # ─────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────
 if "line_items" not in st.session_state:
     st.session_state.line_items = [
-        {"product_idx": 0, "description": "", "details": "", "qty": 1.0, "unit_price": 0.0}
+        {"product_idx": 0, "description": "", "details": "", "qty": 1.0,
+         "unit_price": 0.0, "price_type": "Cliente"}
     ]
 
 def add_line():
     st.session_state.line_items.append(
-        {"product_idx": 0, "description": "", "details": "", "qty": 1.0, "unit_price": 0.0}
+        {"product_idx": 0, "description": "", "details": "", "qty": 1.0,
+         "unit_price": 0.0, "price_type": "Cliente"}
     )
 
 # ─────────────────────────────────────────────
 # UI
 # ─────────────────────────────────────────────
-st.set_page_config(page_title="Proforma Generator", layout="wide")
 st.title("📄 Proforma Invoice Generator")
 
 # ── 1. DATE & NUMBER ──
@@ -249,14 +291,13 @@ with col_d2:
     st.metric("Proforma Number", proforma_number)
 
 year_2digit = selected_date.strftime('%y')
-# Curly apostrophe \u2019 to match template exactly
 formatted_date = selected_date.strftime('%d/%m/') + "\u2019" + year_2digit
 
 # ── 2. CLIENT ──
 st.subheader("2. Client")
 col1, col2 = st.columns([1, 3])
 with col1:
-    salutation = st.selectbox("Salutation", ["Mr.", "Ms.", "Dr."])
+    salutation = st.selectbox("Salutation", ["Mr.", "Ms.", "Dr.", "Messrs."])
 with col2:
     full_name = st.text_input("Contact Full Name", placeholder="e.g. John Smith")
 
@@ -283,14 +324,13 @@ else:
 
 # ── 4. LINE ITEMS ──
 st.subheader("4. Line Items")
-st.caption("Select from catalogue or type a custom product name.")
+st.caption("Select from catalogue or choose '— custom —' to type manually.")
 
 items_to_remove = []
 for i, item in enumerate(st.session_state.line_items):
     with st.container():
         c1, c2, c3, c4 = st.columns([3, 1.5, 1.5, 0.4])
         with c1:
-            # Single dropdown — catalogue + custom option
             prod_idx = st.selectbox(
                 f"Product Name #{i+1} (bold in document)",
                 range(len(PRODUCT_NAMES)),
@@ -298,15 +338,26 @@ for i, item in enumerate(st.session_state.line_items):
                 key=f"prod_{i}",
                 index=item["product_idx"]
             )
+            # Skip category separators
+            if prod_idx > 0 and PRODUCT_NAMES[prod_idx].startswith("── "):
+                prod_idx = item["product_idx"]
+
             if prod_idx != item["product_idx"]:
                 item["product_idx"] = prod_idx
-                if prod_idx > 0:
-                    item["description"] = PRODUCTS[prod_idx - 1]["description"]
-                    item["unit_price"] = PRODUCTS[prod_idx - 1]["unit_price"]
+                if prod_idx > 0 and prod_idx in PRODUCT_MAP:
+                    p = PRODUCT_MAP[prod_idx]
+                    item["description"] = p["description"]
+                    pc = float(p.get("unit_price_client") or 0)
+                    pr = float(p.get("unit_price_reseller") or 0)
+                    item["unit_price"] = pc if item["price_type"] == "Cliente" else pr
+                    item["price_client"] = pc
+                    item["price_reseller"] = pr
                 else:
                     item["description"] = ""
                     item["unit_price"] = 0.0
-            # If custom, show text input to type name
+                    item["price_client"] = 0.0
+                    item["price_reseller"] = 0.0
+
             if prod_idx == 0:
                 item["description"] = st.text_input(
                     "Custom Product Name",
@@ -314,12 +365,30 @@ for i, item in enumerate(st.session_state.line_items):
                     key=f"desc_{i}",
                     placeholder="e.g. CHROMED STEEL ROLLER WW1300"
                 )
+
             item["details"] = st.text_input(
                 "Description / Specs (optional)",
                 value=item.get("details", ""),
                 key=f"details_{i}",
                 placeholder="e.g. Dimensions (Length) × (Width) × (Height) (±0,1) mm. – blackish color"
             )
+
+            # Cliente / Rivenditore toggle (only for catalogue items)
+            if prod_idx > 0 and prod_idx in PRODUCT_MAP:
+                price_type = st.radio(
+                    "Price type",
+                    ["Cliente", "Rivenditore"],
+                    index=0 if item.get("price_type", "Cliente") == "Cliente" else 1,
+                    horizontal=True,
+                    key=f"ptype_{i}"
+                )
+                if price_type != item.get("price_type"):
+                    item["price_type"] = price_type
+                    p = PRODUCT_MAP[prod_idx]
+                    pc = float(p.get("unit_price_client") or 0)
+                    pr = float(p.get("unit_price_reseller") or 0)
+                    item["unit_price"] = pc if price_type == "Cliente" else pr
+
         with c2:
             item["qty"] = st.number_input(
                 "Qty", min_value=0.0, value=float(item["qty"]),
@@ -338,7 +407,7 @@ for i, item in enumerate(st.session_state.line_items):
                 items_to_remove.append(i)
 
         line_total = item["qty"] * item["unit_price"]
-        st.caption(f"Line total: {currency} {line_total:,.2f}")
+        st.caption(f"Line total: {currency} {line_total:.2f}")
         st.divider()
 
 for i in sorted(items_to_remove, reverse=True):
@@ -349,7 +418,7 @@ if items_to_remove:
 st.button("➕ Add Line Item", on_click=add_line)
 
 grand_total = sum(item["qty"] * item["unit_price"] for item in st.session_state.line_items)
-st.markdown(f"### 💰 Total: {currency} {grand_total:,.2f}")
+st.markdown(f"### 💰 Total: {currency} {grand_total:.2f}")
 
 # ── 5. TERMS & CONDITIONS ──
 st.subheader("5. Terms & Conditions")
@@ -399,17 +468,17 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         if region:
             zip_city += f", {region}"
 
-        # Use curly apostrophe to match template
         header_replacements = {
             f"Schio, [DD/MM/\u2019YY]": f"Schio, {formatted_date}",
-            f"[DD/MM/\u2019YY]": formatted_date,
-            "[COMPANY NAME]": company,
-            "[Address]": address,
-            "[Zip] [City], [Region]": zip_city,
-            "[Country]": country,
-            "Mr./Ms. [Full Name]": f"{salutation} {full_name}",
-            "[Full Name]": full_name,
-            "[NNN/YY]": proforma_number,
+            f"[DD/MM/\u2019YY]":        formatted_date,
+            "[COMPANY NAME]":           company,
+            "[Address]":                address,
+            "[Zip] [City], [Region]":   zip_city,
+            "[Country]":                country,
+            "Mr./Ms. [Full Name]":      f"{salutation} {full_name}",
+            "[Sal.]":                   salutation,
+            "[Full Name]":              full_name,
+            "[NNN/YY]":                 proforma_number,
         }
 
         try:
@@ -423,7 +492,7 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
-        # Fix paragraph 0: "Schio, " normal + date bold, both Verdana 10
+        # Paragraph 0: "Schio, " normal + date bold, Verdana 10
         date_para = doc.paragraphs[0]
         for run in date_para.runs:
             run.text = ""
@@ -440,10 +509,10 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         r2.font.name = "Verdana"
         r2.font.size = Pt(10)
 
-        # Apply Verdana 10 to all header paragraphs
+        # Apply Verdana 10 to all other header paragraphs
         for para in doc.paragraphs:
             if para == date_para:
-                continue  # already handled above
+                continue
             for run in para.runs:
                 run.font.name = "Verdana"
                 run.font.size = Pt(10)
@@ -451,12 +520,11 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         # ── Product table (Table 0) ──
         table = doc.tables[0]
 
-        # Remove all rows except header row
+        # Remove all rows except header
         while len(table.rows) > 1:
             tr = table.rows[-1]._tr
             tr.getparent().remove(tr)
 
-        # Add line item rows
         valid_items = [it for it in st.session_state.line_items if it["description"].strip()]
         for idx, item in enumerate(valid_items):
             pos = (idx + 1) * 10
@@ -466,17 +534,15 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
             table._tbl.append(new_tr)
             new_row = table.rows[-1]
 
-            qty_str = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            qty_str   = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             total_str = f"{line_total:.2f},-"
 
             cells = new_row.cells
 
-            # Description cell: bold product name line 1, normal details line 2
+            # Description cell: bold name + optional details
             desc_cell = cells[1]
-            # Clear all paragraph and run level formatting from deepcopy
             for para in desc_cell.paragraphs:
-                # Clear paragraph-level rPr (can inherit italic from header)
                 pPr = para._p.find(qn('w:pPr'))
                 if pPr is not None:
                     rPr_in_pPr = pPr.find(qn('w:rPr'))
@@ -511,59 +577,33 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
                 dr.font.name = "Verdana"
                 dr.font.size = Pt(10)
 
-            set_cell_text(cells[0], str(pos),   bold=False, italic=False)
-            set_cell_text(cells[2], qty_str,    bold=False, italic=False)
-            set_cell_text(cells[3], price_str,  bold=False, italic=False)
-            # ISO currency: Verdana 10, not italic
-            set_cell_text(cells[4], currency,   bold=False, italic=False, font_name="Verdana", font_size=10)
-            set_cell_text(cells[5], total_str,  bold=False, italic=False)
-
-            # No borders on data rows
+            set_cell_text(cells[0], str(pos),  bold=False, italic=False)
+            set_cell_text(cells[2], qty_str,   bold=False, italic=False)
+            set_cell_text(cells[3], price_str, bold=False, italic=False)
+            set_cell_text(cells[4], currency,  bold=False, italic=False)
+            set_cell_text(cells[5], total_str, bold=False, italic=False)
             remove_row_borders(new_row)
 
-        # Add total row — bold, not italic, double top border, no wrap
+        # Total row — bold, double top border, first 4 cells no bottom border
         new_tr = copy.deepcopy(table.rows[0]._tr)
         table._tbl.append(new_tr)
         total_row = table.rows[-1]
         tcells = total_row.cells
-        total_str = f"{grand_total:.2f},-"
+        total_str  = f"{grand_total:.2f},-"
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
 
         set_cell_text(tcells[0], "",           bold=True, italic=False)
         set_cell_text(tcells[1], total_label,  bold=True, italic=False)
         set_cell_text(tcells[2], "",           bold=True, italic=False)
         set_cell_text(tcells[3], "",           bold=True, italic=False)
-        set_cell_text(tcells[4], currency,    bold=True, italic=False, font_name="Verdana", font_size=10)
-        set_cell_text(tcells[5], total_str,   bold=True, italic=False)
+        set_cell_text(tcells[4], currency,     bold=True, italic=False)
+        set_cell_text(tcells[5], total_str,    bold=True, italic=False)
 
-        # Remove all borders then add double top border + no bottom border on every cell
-        for cell in total_row.cells:
-            tc = cell._tc
-            tcPr = tc.find(qn('w:tcPr'))
-            if tcPr is None:
-                tcPr = OxmlElement('w:tcPr')
-                tc.insert(0, tcPr)
-            # Remove existing borders
-            existing = tcPr.find(qn('w:tcBorders'))
-            if existing is not None:
-                tcPr.remove(existing)
-            tcBorders = OxmlElement('w:tcBorders')
-            # Double top border
-            top = OxmlElement('w:top')
-            top.set(qn('w:val'), 'double')
-            top.set(qn('w:sz'), '6')
-            top.set(qn('w:space'), '0')
-            top.set(qn('w:color'), 'auto')
-            tcBorders.append(top)
-            # All other sides nil
-            for side in ['left', 'bottom', 'right']:
-                b = OxmlElement(f'w:{side}')
-                b.set(qn('w:val'), 'nil')
-                tcBorders.append(b)
-            tcPr.append(tcBorders)
-            # No wrap
-            noWrap = OxmlElement('w:noWrap')
-            tcPr.append(noWrap)
+        # Cells 0–3: double top border, no bottom border
+        for idx, cell in enumerate(tcells):
+            set_cell_borders(cell, top_val='double', bottom_val='nil',
+                             left_val='nil', right_val='nil', top_double=True)
+            add_no_wrap(cell)
 
         # ── Terms table (Table 1) ──
         terms_table = doc.tables[1]
@@ -577,17 +617,16 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         }
         for row_idx, value in terms_map.items():
             if row_idx < len(terms_table.rows):
-                set_cell_text(terms_table.rows[row_idx].cells[1], value, bold=False, italic=False)
+                set_cell_text(terms_table.rows[row_idx].cells[1], value,
+                              bold=False, italic=False)
 
-        # Save to buffer
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
 
-        # Save to Supabase
         save_proforma(proforma_number, company, grand_total, currency)
 
-        st.success(f"✅ Proforma {proforma_number} ready! Total: {currency} {grand_total:,.2f}")
+        st.success(f"✅ Proforma {proforma_number} ready! Total: {currency} {grand_total:.2f}")
         st.download_button(
             label="📄 Download Word Document",
             data=buffer,
