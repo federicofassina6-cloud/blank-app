@@ -2,7 +2,6 @@ import os
 import copy
 import streamlit as st
 from docx import Document
-from docx.oxml.ns import qn
 from datetime import date
 import io
 import requests
@@ -23,19 +22,20 @@ def get_next_proforma_number():
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/fatture_proforma",
         headers=HEADERS,
-        params={"proforma_number": f"like.%/{year_2digit}", "select": "proforma_number"}
+        params={"select": "proforma_number"}
     )
     try:
         existing = response.json()
         if isinstance(existing, list):
-            next_num = len(existing) + 1
+            this_year = [r for r in existing if str(r.get("proforma_number", "")).endswith(f"/{year_2digit}")]
+            next_num = len(this_year) + 1
         else:
             next_num = 1
     except:
         next_num = 1
     return f"{next_num:03d}/{year_2digit}"
 
-def save_proforma(proforma_number, client_company, total_amount):
+def save_proforma(proforma_number, client_company, total_amount, currency):
     requests.post(
         f"{SUPABASE_URL}/rest/v1/fatture_proforma",
         headers=HEADERS,
@@ -43,12 +43,13 @@ def save_proforma(proforma_number, client_company, total_amount):
             "proforma_number": proforma_number,
             "client_company": client_company,
             "total_amount": total_amount,
+            "currency": currency,
             "status": "not_sent"
         }
     )
 
 # ─────────────────────────────────────────────
-# PRODUCT CATALOGUE
+# CATALOGUES
 # ─────────────────────────────────────────────
 PRODUCTS = [
     {"description": "CHROMED STEEL ENGRAVED ROLLER WW1300 with positive pattern for reverse rotation. Engraving 20C", "unit_price": 1750.0},
@@ -68,19 +69,22 @@ PRODUCTS = [
     {"description": "FRONT SIDE SEAL (white plastic dam)", "unit_price": 34.0},
     {"description": "RH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
     {"description": "LH SIDE SEAL (white plastic dam)", "unit_price": 31.0},
-    {"description": "Split pins float valve 510/2 heavy, brass seat diam. 5 mm rod length 200 mm with ¼ W thread, long type (FARG)", "unit_price": 5.5},
+    {"description": "Split pins float valve 510/2 heavy, brass seat diam. 5 mm rod length 200 mm with 1/4 W thread, long type (FARG)", "unit_price": 5.5},
     {"description": "Float valve in plastic with ball (FARG)", "unit_price": 0.5},
     {"description": "Motovario gearbox NMRV-P 063 7.5:1 PAM 120/19 slow shaft D25", "unit_price": 430.0},
     {"description": "Packing charges", "unit_price": 450.0},
     {"description": "CIF SZX airport charges", "unit_price": 1200.0},
     {"description": "Packing and DAP charges", "unit_price": 130.0},
-    {"description": "Frame Tinter spares kit", "unit_price": 0.0},
-    {"description": "Tinter 1300 spares kit", "unit_price": 0.0},
-    {"description": "Tinter 2600 spares kit", "unit_price": 0.0},
+    {"description": "Frame Tinter spares kit (section header, price=0)", "unit_price": 0.0},
+    {"description": "Tinter 1300 spares kit (section header, price=0)", "unit_price": 0.0},
+    {"description": "Tinter 2600 spares kit (section header, price=0)", "unit_price": 0.0},
+]
+PRODUCT_NAMES = ["— custom —"] + [
+    p["description"][:65] + ("…" if len(p["description"]) > 65 else "")
+    for p in PRODUCTS
 ]
 
-PRODUCT_NAMES = ["— custom —"] + [p["description"][:60] + ("..." if len(p["description"]) > 60 else "") for p in PRODUCTS]
-
+CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CNY", "JPY"]
 HS_CODES = ["84.66.9195", "84.79.8998", "84.48.5900", "84.77.9000", "39.26.3000", "84.73.3000"]
 PAYMENT_OPTIONS = [
     "In advance by T/t transfer",
@@ -133,37 +137,14 @@ def replace_in_paragraph(para, replacements):
         for run in para.runs[1:]:
             run.text = ""
 
-def copy_row_format(table, source_row_idx, new_row_idx):
-    """Insert a new row by copying the format of an existing row."""
-    source_row = table.rows[source_row_idx]
-    new_tr = copy.deepcopy(source_row._tr)
-    table._tbl.insert(new_row_idx + 1, new_tr)
-    return table.rows[new_row_idx + 1]
-
-def fill_item_row(row, pos, description, qty, currency, total):
-    cells = row.cells
-    cells[0].paragraphs[0].runs[0].text if cells[0].paragraphs[0].runs else None
-    for para in cells[0].paragraphs:
-        for run in para.runs: run.text = ""
-        if para.runs: para.runs[0].text = str(pos)
-        else: para.add_run(str(pos))
-    for para in cells[1].paragraphs:
-        for run in para.runs: run.text = ""
-        if para.runs: para.runs[0].text = description
-        else: para.add_run(description)
-    for para in cells[2].paragraphs:
-        for run in para.runs: run.text = ""
-        if para.runs: para.runs[0].text = f"{qty:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        else: para.add_run(f"{qty:,.2f}")
-    for para in cells[3].paragraphs:
-        for run in para.runs: run.text = ""
-        if para.runs: para.runs[0].text = currency
-        else: para.add_run(currency)
-    for para in cells[4].paragraphs:
-        for run in para.runs: run.text = ""
-        total_str = f"{total:,.0f},-".replace(",", ".")
-        if para.runs: para.runs[0].text = total_str
-        else: para.add_run(total_str)
+def set_cell_text(cell, text):
+    for para in cell.paragraphs:
+        for run in para.runs:
+            run.text = ""
+    if cell.paragraphs[0].runs:
+        cell.paragraphs[0].runs[0].text = text
+    else:
+        cell.paragraphs[0].add_run(text)
 
 # ─────────────────────────────────────────────
 # SESSION STATE
@@ -174,11 +155,9 @@ if "line_items" not in st.session_state:
     ]
 
 def add_line():
-    st.session_state.line_items.append({"product_idx": 0, "description": "", "qty": 1.0, "unit_price": 0.0})
-
-def remove_line(i):
-    if len(st.session_state.line_items) > 1:
-        st.session_state.line_items.pop(i)
+    st.session_state.line_items.append(
+        {"product_idx": 0, "description": "", "qty": 1.0, "unit_price": 0.0}
+    )
 
 # ─────────────────────────────────────────────
 # UI
@@ -186,7 +165,7 @@ def remove_line(i):
 st.set_page_config(page_title="Proforma Generator", layout="wide")
 st.title("📄 Proforma Invoice Generator")
 
-# ── 1. DATE & NUMBER ──────────────────────────
+# ── 1. DATE & NUMBER ──
 st.subheader("1. Date & Number")
 col_d1, col_d2 = st.columns(2)
 with col_d1:
@@ -196,9 +175,9 @@ with col_d2:
     st.metric("Proforma Number", proforma_number)
 
 year_2digit = selected_date.strftime('%y')
-formatted_date = selected_date.strftime('%d/%m/') + "'" + year_2digit
+formatted_date = selected_date.strftime('%d/%m/') + "\u2019" + year_2digit
 
-# ── 2. CLIENT ─────────────────────────────────
+# ── 2. CLIENT ──
 st.subheader("2. Client")
 col1, col2 = st.columns([1, 3])
 with col1:
@@ -219,14 +198,18 @@ with col5:
 
 country = st.text_input("Country", placeholder="e.g. China")
 
-# ── 3. LINE ITEMS ─────────────────────────────
-st.subheader("3. Line Items")
+# ── 3. CURRENCY ──
+st.subheader("3. Currency")
+currency = st.selectbox("Currency (ISO)", CURRENCIES)
+
+# ── 4. LINE ITEMS ──
+st.subheader("4. Line Items")
 st.caption("Select from catalogue or choose '— custom —' to type manually.")
 
 items_to_remove = []
 for i, item in enumerate(st.session_state.line_items):
     with st.container():
-        c1, c2, c3, c4, c5 = st.columns([2, 5, 1.2, 1.5, 0.5])
+        c1, c2, c3, c4, c5 = st.columns([2, 5, 1.2, 1.5, 0.4])
         with c1:
             prod_idx = st.selectbox(
                 f"Product #{i+1}",
@@ -245,15 +228,19 @@ for i, item in enumerate(st.session_state.line_items):
                     item["unit_price"] = 0.0
         with c2:
             item["description"] = st.text_input(
-                "Description",
-                value=item["description"],
-                key=f"desc_{i}",
-                placeholder="Product description"
+                "Description", value=item["description"],
+                key=f"desc_{i}", placeholder="Product description"
             )
         with c3:
-            item["qty"] = st.number_input("Qty", min_value=0.0, value=float(item["qty"]), step=1.0, key=f"qty_{i}")
+            item["qty"] = st.number_input(
+                "Qty", min_value=0.0, value=float(item["qty"]),
+                step=1.0, key=f"qty_{i}"
+            )
         with c4:
-            item["unit_price"] = st.number_input("Unit Price (EUR)", min_value=0.0, value=float(item["unit_price"]), step=10.0, key=f"price_{i}")
+            item["unit_price"] = st.number_input(
+                f"Unit Price ({currency})", min_value=0.0,
+                value=float(item["unit_price"]), step=10.0, key=f"price_{i}"
+            )
         with c5:
             st.write("")
             st.write("")
@@ -261,7 +248,7 @@ for i, item in enumerate(st.session_state.line_items):
                 items_to_remove.append(i)
 
         line_total = item["qty"] * item["unit_price"]
-        st.caption(f"Line total: EUR {line_total:,.2f}")
+        st.caption(f"Line total: {currency} {line_total:,.2f}")
         st.divider()
 
 for i in sorted(items_to_remove, reverse=True):
@@ -271,13 +258,11 @@ if items_to_remove:
 
 st.button("➕ Add Line Item", on_click=add_line)
 
-# Total
 grand_total = sum(item["qty"] * item["unit_price"] for item in st.session_state.line_items)
-st.markdown(f"### 💰 Total: EUR {grand_total:,.2f}")
+st.markdown(f"### 💰 Total: {currency} {grand_total:,.2f}")
 
-# ── 4. TERMS & CONDITIONS ─────────────────────
-st.subheader("4. Terms & Conditions")
-
+# ── 5. TERMS & CONDITIONS ──
+st.subheader("5. Terms & Conditions")
 col_t1, col_t2 = st.columns(2)
 with col_t1:
     hs_code = st.selectbox("HS Code", HS_CODES + ["— custom —"])
@@ -305,12 +290,12 @@ with col_t2:
     if shipment == "— custom —":
         shipment = st.text_input("Custom Shipment")
 
-# ── 5. DOCUMENT NAME ──────────────────────────
-st.subheader("5. Document Name")
-default_name = f"proforma {selected_date.strftime('%m-%Y')} {company}"
+# ── 6. DOCUMENT NAME ──
+st.subheader("6. Document Name")
+default_name = f"proforma {proforma_number.replace('/', '-')} {company}"
 doc_name = st.text_input("File name (without .docx)", value=default_name)
 
-# ── GENERATE ──────────────────────────────────
+# ── GENERATE ──
 st.divider()
 if st.button("📥 Generate Proforma Invoice", type="primary", use_container_width=True):
     if not company:
@@ -324,12 +309,9 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         if region:
             zip_city += f", {region}"
 
-        total_label = f"TOTAL PRICE – {delivery_terms} -"
-
-        # Header replacements
         header_replacements = {
-            "Schio, [DD/MM/'YY]": f"Schio, {formatted_date}",
-            "[DD/MM/'YY]": formatted_date,
+            f"Schio, [DD/MM/\u2019YY]": f"Schio, {formatted_date}",
+            f"[DD/MM/\u2019YY]": formatted_date,
             "[COMPANY NAME]": company,
             "[Address]": address,
             "[Zip] [City], [Region]": zip_city,
@@ -346,108 +328,70 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
             st.error(f"❌ Template not found: {e}")
             st.stop()
 
-        # Replace in all paragraphs
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
-        # ── Fill product table (Table 0) ──
+        # ── Product table (Table 0) ──
         table = doc.tables[0]
 
-        # Remove all existing data rows (keep header row 0)
-        # We'll clear rows 1 to end, then rebuild
-        # First collect template row format from row 1
+        # Remove all rows except header
         while len(table.rows) > 1:
             tr = table.rows[-1]._tr
             tr.getparent().remove(tr)
 
-        # Add line item rows
-        valid_items = [item for item in st.session_state.line_items if item["description"].strip()]
+        valid_items = [it for it in st.session_state.line_items if it["description"].strip()]
         for idx, item in enumerate(valid_items):
             pos = (idx + 1) * 10
             line_total = item["qty"] * item["unit_price"]
-
-            # Add new row by copying header structure
-            from docx.oxml import OxmlElement
-            # Copy the header row's XML as a base for new rows
             new_tr = copy.deepcopy(table.rows[0]._tr)
             table._tbl.append(new_tr)
-            new_row = table.rows[-1]
+            cells = table.rows[-1].cells
 
-            # Set cell texts
-            cells = new_row.cells
-            def set_cell(cell, text):
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        run.text = ""
-                if cells[0].paragraphs[0].runs:
-                    cell.paragraphs[0].runs[0].text = text
-                else:
-                    cell.paragraphs[0].add_run(text)
-
-            total_str = f"{line_total:,.0f},-".replace(",", ".")
             qty_str = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            total_str = f"{line_total:,.0f},-".replace(",", ".")
 
-            set_cell(cells[0], str(pos))
-            set_cell(cells[1], item["description"])
-            set_cell(cells[2], qty_str)
-            set_cell(cells[3], "EUR")
-            set_cell(cells[4], total_str)
+            set_cell_text(cells[0], str(pos))
+            set_cell_text(cells[1], item["description"])
+            set_cell_text(cells[2], qty_str)
+            set_cell_text(cells[3], price_str)
+            set_cell_text(cells[4], currency)
+            set_cell_text(cells[5], total_str)
 
-        # Add total row
+        # Total row
         new_tr = copy.deepcopy(table.rows[0]._tr)
         table._tbl.append(new_tr)
-        total_row = table.rows[-1]
-        tcells = total_row.cells
+        tcells = table.rows[-1].cells
         total_str = f"{grand_total:,.0f},-".replace(",", ".")
+        total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
+        set_cell_text(tcells[0], total_label)
+        set_cell_text(tcells[1], "")
+        set_cell_text(tcells[2], "")
+        set_cell_text(tcells[3], "")
+        set_cell_text(tcells[4], currency)
+        set_cell_text(tcells[5], total_str)
 
-        def set_cell_total(cell, text):
-            for para in cell.paragraphs:
-                for run in para.runs:
-                    run.text = ""
-            if cell.paragraphs[0].runs:
-                cell.paragraphs[0].runs[0].text = text
-            else:
-                cell.paragraphs[0].add_run(text)
-
-        set_cell_total(tcells[0], "")
-        set_cell_total(tcells[1], total_label)
-        set_cell_total(tcells[2], "")
-        set_cell_total(tcells[3], "EUR")
-        set_cell_total(tcells[4], total_str)
-
-        # ── Fill terms table (Table 1) ──
+        # ── Terms table (Table 1) ──
         terms_table = doc.tables[1]
         terms_map = {
-            0: hs_code,       # HS code
-            1: payment,       # Payment
-            # row 2 = Bank details (hardcoded, skip)
-            # row 3 = Beneficiary (hardcoded, skip)
+            0: hs_code,
+            1: payment,
             4: delivery_terms,
             5: delivery_time,
             6: packing,
             7: shipment,
-            # row 8 = Guarantee (hardcoded, skip)
         }
         for row_idx, value in terms_map.items():
             if row_idx < len(terms_table.rows):
-                cell = terms_table.rows[row_idx].cells[1]
-                for para in cell.paragraphs:
-                    for run in para.runs:
-                        run.text = ""
-                if cell.paragraphs[0].runs:
-                    cell.paragraphs[0].runs[0].text = value
-                else:
-                    cell.paragraphs[0].add_run(value)
+                set_cell_text(terms_table.rows[row_idx].cells[1], value)
 
-        # Save to buffer
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
 
-        # Save to Supabase
-        save_proforma(proforma_number, company, grand_total)
+        save_proforma(proforma_number, company, grand_total, currency)
 
-        st.success(f"✅ Proforma {proforma_number} ready! Total: EUR {grand_total:,.2f}")
+        st.success(f"✅ Proforma {proforma_number} ready! Total: {currency} {grand_total:,.2f}")
         st.download_button(
             label="📄 Download Word Document",
             data=buffer,
