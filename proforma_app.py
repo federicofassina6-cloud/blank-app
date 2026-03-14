@@ -91,7 +91,7 @@ def load_customers():
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/customers",
         headers=HEADERS,
-        params={"select": "id,company_name,contact_name,email,phone,address,city,zip,country,notes",
+        params={"select": "id,company_name,contact_name,salutation,email,phone,address,city,zip,country,notes",
                 "order": "company_name.asc"}
     )
     try:
@@ -135,8 +135,7 @@ def save_delivery_term(term):
         json={"term": term}
     )
 
-def save_customer(company_name, contact_name, email, phone, address, city, zip_code, country, notes):
-    # Check if customer already exists by company name
+def save_customer(company_name, contact_name, salutation, email, phone, address, city, zip_code, country, notes):
     check = requests.get(
         f"{SUPABASE_URL}/rest/v1/customers",
         headers=HEADERS,
@@ -145,7 +144,7 @@ def save_customer(company_name, contact_name, email, phone, address, city, zip_c
     try:
         existing = check.json()
         if isinstance(existing, list) and len(existing) > 0:
-            return  # already exists, skip
+            return
     except:
         pass
     requests.post(
@@ -154,6 +153,7 @@ def save_customer(company_name, contact_name, email, phone, address, city, zip_c
         json={
             "company_name": company_name,
             "contact_name": contact_name,
+            "salutation": salutation,
             "email": email,
             "phone": phone,
             "address": address,
@@ -397,7 +397,8 @@ with col_refresh:
 # Auto-fill if customer selected
 if selected_customer_idx > 0:
     cust = customers[selected_customer_idx - 1]
-    default_salutation = "Mr."
+    sal = cust.get("salutation", "Mr.") or "Mr."
+    default_salutation = sal if sal in ["Mr.", "Ms.", "Dr.", "Messrs."] else "Mr."
     default_full_name  = cust.get("contact_name", "")
     default_company    = cust.get("company_name", "")
     default_address    = cust.get("address", "")
@@ -791,6 +792,7 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
             save_customer(
                 company_name=company,
                 contact_name=full_name,
+                salutation=salutation,
                 email="",
                 phone="",
                 address=address,
