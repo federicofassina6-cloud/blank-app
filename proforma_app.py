@@ -314,8 +314,10 @@ for cat in CATEGORIES:
     PRODUCT_NAMES.append(f"── {cat} ──")
     for p in cat_products:
         desc_key = "description" if LANG == "it" else "description_eng"
-        label = (p.get(desc_key) or p["description"])[:65]
-        label += "…" if len(p.get(desc_key) or p["description"]) > 65 else ""
+        primary = (p.get(desc_key) or p["description"])
+        label = primary[:65] + ("…" if len(primary) > 65 else "")
+        if LANG == "en" and p.get("description") and p.get("description_eng"):
+            label += f'  ({p["description"][:35]})'
         PRODUCT_MAP[len(PRODUCT_NAMES)] = p
         PRODUCT_NAMES.append(label)
 
