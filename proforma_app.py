@@ -527,7 +527,6 @@ for i, item in enumerate(st.session_state.line_items):
             # Read-only price display — cannot be modified
             st.write(f"**Unit Price ({currency})**")
             st.write(f"{item['unit_price']:.2f}")
-            )
         with c4:
             st.write("")
             st.write("")
