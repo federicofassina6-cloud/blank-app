@@ -11,6 +11,18 @@ import requests
 
 st.set_page_config(page_title="Fattura Generator", layout="wide")
 
+def fmt_price(n):
+    """Format number as European: 2.470,– """
+    formatted = f"{n:,.2f}"  # 2,470.00
+    # swap separators: , -> X -> . and . -> ,
+    formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
+    # remove trailing ,00 zeros and add –
+    if formatted.endswith(",00"):
+        formatted = formatted[:-3] + ",–"
+    else:
+        formatted = formatted + "–"
+    return formatted
+
 # ─────────────────────────────────────────────
 # PASSWORD GATE
 # ─────────────────────────────────────────────
@@ -531,7 +543,7 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 step=1.0, format="%.1f", key=f"fattura_qty_{i}")
         with c3:
             st.write(f"**Unit Price ({currency})**")
-            st.write(f"{item['unit_price']:,.2f}")
+            st.write(fmt_price(item["unit_price"]))
         with c4:
             st.write("")
             st.write("")
@@ -539,7 +551,7 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 items_to_remove.append(i)
 
         line_total = item["qty"] * item["unit_price"]
-        st.caption(f"Line total: {currency} {line_total:,.2f}")
+        st.caption(f"Line total: {currency} {fmt_price(line_total)}")
         st.divider()
 
 for i in sorted(items_to_remove, reverse=True):
@@ -549,7 +561,7 @@ if items_to_remove or needs_rerun:
 
 st.button("➕ Add Line Item", on_click=add_line)
 grand_total = sum(item["qty"] * item["unit_price"] for item in st.session_state.fattura_line_items)
-st.markdown(f"### 💰 Total: {currency} {grand_total:,.2f}")
+st.markdown(f"### 💰 Total: {currency} {fmt_price(grand_total)}")
 
 # ── 7. DOCUMENT NAME ──
 st.subheader("7. Document Name")
@@ -628,8 +640,8 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
                 item       = valid_items[row_idx - 1]
                 line_total = item["qty"] * item["unit_price"]
                 qty_str    = f"{item['qty']:.1f}"
-                price_str  = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                total_str  = f"{line_total:,.2f},-"
+                price_str  = fmt_price(item["unit_price"])
+                total_str  = fmt_price(line_total)
 
                 # Qty cell
                 set_cell_text(cells[0], qty_str, bold=False)
@@ -685,7 +697,7 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
             total_label += f"\n\n{vat_exemption}"
         set_cell_text(tcells[1], total_label, bold=True)
         set_cell_text(tcells[4], currency,    bold=True)
-        set_cell_text(tcells[5], f"{grand_total:,.2f},-", bold=True)
+        set_cell_text(tcells[5], fmt_price(grand_total), bold=True)
 
         # ── HS Code row (row 17) ──
         hs_row = t2.rows[17]
@@ -698,7 +710,7 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
 
         save_fattura(invoice_number, company, grand_total, currency)
 
-        st.success(f"✅ Fattura {invoice_number} ready! Total: {currency} {grand_total:,.2f}")
+        st.success(f"✅ Fattura {invoice_number} ready! Total: {currency} {fmt_price(grand_total)}")
         st.download_button(
             label="📄 Download Word Document",
             data=buffer,
