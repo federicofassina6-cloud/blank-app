@@ -519,7 +519,7 @@ for i, item in enumerate(st.session_state.line_items):
         with c2:
             item["qty"] = st.number_input(
                 LBL["qty"], min_value=0.0, value=float(item["qty"]),
-                step=1.0, format="%.2f", key=f"qty_{i}")
+                step=1.0, format="%.1f", key=f"qty_{i}")
         with c3:
             st.write(f"**{LBL['unit_price'].format(cur=currency)}**")
             st.write(f"{item['unit_price']:.2f}")
@@ -659,8 +659,8 @@ if st.button(LBL["generate"], type="primary", use_container_width=True):
                 item      = valid_items[row_idx - 1]
                 pos       = row_idx * 10
                 line_total = item["qty"] * item["unit_price"]
-                qty_str   = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                qty_str   = f"{item['qty']:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                price_str = f"{item['unit_price']:,.1f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 total_str = f"{line_total:.2f},-"
                 set_cell_text(cells[0], str(pos), bold=False)
                 desc_cell  = cells[1]
