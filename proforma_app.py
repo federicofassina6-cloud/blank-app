@@ -719,12 +719,30 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
         tcells = total_row.cells
         total_str   = f"{grand_total:.2f},-"
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
-        # tcells[0] spans 4 cols in template → label
+        # The first cell spans 4 cols — python-docx repeats it 4x in .cells
+        # So: tcells[0]=tcells[1]=tcells[2]=tcells[3] = merged label cell
+        #     tcells[4] = ISO column
+        #     tcells[5] = total price column
         set_cell_text(tcells[0], total_label, bold=True, italic=False)
-        # tcells[1] → ISO currency (this is the 5th column = index 4 visually)
-        set_cell_text(tcells[1], currency,    bold=True, italic=False)
-        # tcells[2] → total price
-        set_cell_text(tcells[2], total_str,   bold=True, italic=False)
+        set_cell_text(tcells[4], currency,    bold=True, italic=False)
+        set_cell_text(tcells[5], total_str,   bold=True, italic=False)
+
+        # Hide empty data rows by collapsing row height to 1 twip
+        num_items = len(valid_items)
+        for row_idx in range(num_items + 1, MAX_ROWS + 1):
+            row = table.rows[row_idx]
+            trPr = row._tr.find(qn('w:trPr'))
+            if trPr is None:
+                trPr = OxmlElement('w:trPr')
+                row._tr.insert(0, trPr)
+            # Remove existing trHeight
+            existing_h = trPr.find(qn('w:trHeight'))
+            if existing_h is not None:
+                trPr.remove(existing_h)
+            trH = OxmlElement('w:trHeight')
+            trH.set(qn('w:val'), '1')
+            trH.set(qn('w:hRule'), 'exact')
+            trPr.append(trH)
 
         # ── Terms table (Table 1) ──
         terms_table = doc.tables[1]
