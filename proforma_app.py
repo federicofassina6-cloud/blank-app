@@ -96,7 +96,7 @@ def load_products():
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/products",
         headers=HEADERS,
-        params={"select": "id,description,unit_price_client,unit_price_reseller,category",
+        params={"select": "id,description,description_eng,unit_price_client,unit_price_reseller,category",
                 "order": "category.asc,created_at.asc"}
     )
     try:
@@ -313,7 +313,9 @@ for cat in CATEGORIES:
     cat_products = [p for p in PRODUCTS if (p.get("category") or "Other") == cat]
     PRODUCT_NAMES.append(f"── {cat} ──")
     for p in cat_products:
-        label = p["description"][:65] + ("…" if len(p["description"]) > 65 else "")
+        desc_key = "description" if LANG == "it" else "description_eng"
+        label = (p.get(desc_key) or p["description"])[:65]
+        label += "…" if len(p.get(desc_key) or p["description"]) > 65 else ""
         PRODUCT_MAP[len(PRODUCT_NAMES)] = p
         PRODUCT_NAMES.append(label)
 
@@ -502,7 +504,8 @@ for i, item in enumerate(st.session_state.line_items):
                 item["product_idx"] = prod_idx
                 if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                     p = PRODUCT_MAP[prod_idx]
-                    item["description"]    = p["description"]
+                    desc_key = "description" if LANG == "it" else "description_eng"
+                    item["description"]    = p.get(desc_key) or p["description"]
                     item["price_client"]   = float(p.get("unit_price_client")   or 0)
                     item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
                     item["unit_price"] = item["price_client"] if global_price_type == LBL["cliente"] else item["price_reseller"]
