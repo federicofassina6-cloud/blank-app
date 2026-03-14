@@ -438,13 +438,32 @@ with col5:
 
 country = st.text_input("Country", value=default_country, placeholder="e.g. China")
 
-# ── 3. CURRENCY ──
-st.subheader("3. Currency")
-currency_choice = st.selectbox("Currency (ISO)", CURRENCIES)
-if currency_choice == "— custom —":
-    currency = st.text_input("Enter ISO currency code", placeholder="e.g. AED, BRL, INR")
-else:
-    currency = currency_choice
+# ── 3. CURRENCY & PRICE TYPE ──
+st.subheader("3. Currency & Price Type")
+col_cur, col_pt = st.columns(2)
+with col_cur:
+    currency_choice = st.selectbox("Currency (ISO)", CURRENCIES)
+    if currency_choice == "— custom —":
+        currency = st.text_input("Enter ISO currency code", placeholder="e.g. AED, BRL, INR")
+    else:
+        currency = currency_choice
+with col_pt:
+    global_price_type = st.radio(
+        "Price type (applies to all products)",
+        ["Cliente", "Rivenditore"],
+        horizontal=True,
+        key="global_price_type"
+    )
+    # When price type changes, update all line item prices
+    if st.session_state.get("_last_price_type") != global_price_type:
+        st.session_state["_last_price_type"] = global_price_type
+        for item in st.session_state.line_items:
+            item["price_type"] = global_price_type
+            if item.get("product_idx", 0) > 0 and item.get("product_idx") in PRODUCT_MAP:
+                pc = item.get("price_client", 0.0)
+                pr = item.get("price_reseller", 0.0)
+                item["unit_price"] = pc if global_price_type == "Cliente" else pr
+        st.rerun()
 
 # ── 4. LINE ITEMS ──
 st.subheader("4. Line Items")
@@ -474,15 +493,14 @@ for i, item in enumerate(st.session_state.line_items):
                     item["description"]    = p["description"]
                     item["price_client"]   = float(p.get("unit_price_client")   or 0)
                     item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
-                    new_price = item["price_client"] if item.get("price_type", "Cliente") == "Cliente" else item["price_reseller"]
+                    new_price = item["price_client"] if global_price_type == "Cliente" else item["price_reseller"]
                     item["unit_price"] = new_price
-                    st.session_state[f"price_{i}"] = new_price  # force widget to update
+                    item["price_type"] = global_price_type
                 else:
                     item["description"]    = ""
                     item["unit_price"]     = 0.0
                     item["price_client"]   = 0.0
                     item["price_reseller"] = 0.0
-                    st.session_state[f"price_{i}"] = 0.0
                 needs_rerun = True
 
             if prod_idx == 0:
@@ -500,35 +518,15 @@ for i, item in enumerate(st.session_state.line_items):
                 placeholder="e.g. Dimensions (Length) × (Width) × (Height) (±0,1) mm. – blackish color"
             )
 
-            # Cliente / Rivenditore toggle (only for catalogue items)
-            if prod_idx > 0 and prod_idx in PRODUCT_MAP:
-                price_type = st.radio(
-                    "Price type",
-                    ["Cliente", "Rivenditore"],
-                    index=0 if item.get("price_type", "Cliente") == "Cliente" else 1,
-                    horizontal=True,
-                    key=f"ptype_{i}"
-                )
-                if price_type != item.get("price_type"):
-                    item["price_type"] = price_type
-                    new_price = item.get("price_client", 0.0) if price_type == "Cliente" else item.get("price_reseller", 0.0)
-                    item["unit_price"] = new_price
-                    st.session_state[f"price_{i}"] = new_price  # force widget to update
-                    needs_rerun = True
-
         with c2:
             item["qty"] = st.number_input(
                 "Qty", min_value=0.0, value=float(item["qty"]),
                 step=1.0, format="%.2f", key=f"qty_{i}"
             )
         with c3:
-            # Sync item unit_price from widget state if it was changed by user
-            if f"price_{i}" in st.session_state:
-                item["unit_price"] = float(st.session_state[f"price_{i}"])
-            item["unit_price"] = st.number_input(
-                f"Unit Price ({currency})", min_value=0.0,
-                value=float(item["unit_price"]), step=0.01,
-                format="%.2f", key=f"price_{i}"
+            # Read-only price display — cannot be modified
+            st.write(f"**Unit Price ({currency})**")
+            st.write(f"{item['unit_price']:.2f}")
             )
         with c4:
             st.write("")
@@ -717,13 +715,16 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
                 for cell in cells:
                     set_cell_text(cell, "", bold=False, italic=False)
 
-        # Total row (row 16) — already in template, just fill values
+        # Total row (row 16) — fill: label | ISO | total
         total_row = table.rows[MAX_ROWS + 1]
         tcells = total_row.cells
         total_str   = f"{grand_total:.2f},-"
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
+        # tcells[0] spans 4 cols in template → label
         set_cell_text(tcells[0], total_label, bold=True, italic=False)
+        # tcells[1] → ISO currency (this is the 5th column = index 4 visually)
         set_cell_text(tcells[1], currency,    bold=True, italic=False)
+        # tcells[2] → total price
         set_cell_text(tcells[2], total_str,   bold=True, italic=False)
 
         # ── Terms table (Table 1) ──
