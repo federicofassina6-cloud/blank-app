@@ -653,93 +653,78 @@ if st.button("📥 Generate Proforma Invoice", type="primary", use_container_wid
                 run.font.name = "Verdana"
                 run.font.size = Pt(10)
 
-        # ── Product table (Table 0) ──
+        # ── Product table (Table 0) — fill fixed 15 rows ──
         table = doc.tables[0]
-
-        # Remove all rows except header
-        while len(table.rows) > 1:
-            tr = table.rows[-1]._tr
-            tr.getparent().remove(tr)
-
+        # Row 0 = header, rows 1-15 = data, row 16 = total
+        MAX_ROWS = 15
         valid_items = [it for it in st.session_state.line_items if it["description"].strip()]
-        for idx, item in enumerate(valid_items):
-            pos = (idx + 1) * 10
-            line_total = item["qty"] * item["unit_price"]
 
-            new_tr = copy.deepcopy(table.rows[0]._tr)
-            table._tbl.append(new_tr)
-            new_row = table.rows[-1]
+        for row_idx in range(1, MAX_ROWS + 1):
+            row = table.rows[row_idx]
+            cells = row.cells
 
-            qty_str   = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            total_str = f"{line_total:.2f},-"
+            if row_idx - 1 < len(valid_items):
+                item = valid_items[row_idx - 1]
+                pos = row_idx * 10
+                line_total = item["qty"] * item["unit_price"]
+                qty_str   = f"{item['qty']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                price_str = f"{item['unit_price']:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                total_str = f"{line_total:.2f},-"
 
-            cells = new_row.cells
+                set_cell_text(cells[0], str(pos),  bold=False, italic=False)
 
-            # Description cell: bold name + optional details
-            desc_cell = cells[1]
-            for para in desc_cell.paragraphs:
-                pPr = para._p.find(qn('w:pPr'))
-                if pPr is not None:
-                    rPr_in_pPr = pPr.find(qn('w:rPr'))
-                    if rPr_in_pPr is not None:
-                        pPr.remove(rPr_in_pPr)
-                for run in para.runs:
-                    run.text = ""
-                    rPr = run._r.find(qn('w:rPr'))
-                    if rPr is not None:
-                        run._r.remove(rPr)
+                # Description cell: bold name line 1, details line 2
+                desc_cell = cells[1]
+                for para in desc_cell.paragraphs:
+                    pPr = para._p.find(qn('w:pPr'))
+                    if pPr is not None:
+                        rPr_in_pPr = pPr.find(qn('w:rPr'))
+                        if rPr_in_pPr is not None:
+                            pPr.remove(rPr_in_pPr)
+                    for run in para.runs:
+                        run.text = ""
+                        rPr = run._r.find(qn('w:rPr'))
+                        if rPr is not None:
+                            run._r.remove(rPr)
+                first_para = desc_cell.paragraphs[0]
+                r = first_para.add_run(item["description"])
+                r.bold = True
+                r.italic = False
+                r.font.name = "Verdana"
+                r.font.size = Pt(10)
+                details = item.get("details", "").strip()
+                if details:
+                    new_p = copy.deepcopy(first_para._p)
+                    desc_cell._tc.append(new_p)
+                    second_para = desc_cell.paragraphs[-1]
+                    for run in second_para.runs:
+                        run.text = ""
+                        rPr = run._r.find(qn('w:rPr'))
+                        if rPr is not None:
+                            run._r.remove(rPr)
+                    dr = second_para.add_run(details)
+                    dr.bold = False
+                    dr.italic = False
+                    dr.font.name = "Verdana"
+                    dr.font.size = Pt(10)
 
-            first_para = desc_cell.paragraphs[0]
-            r = first_para.add_run(item["description"])
-            r.bold = True
-            r.italic = False
-            r.font.name = "Verdana"
-            r.font.size = Pt(10)
+                set_cell_text(cells[2], qty_str,   bold=False, italic=False)
+                set_cell_text(cells[3], price_str, bold=False, italic=False)
+                set_cell_text(cells[4], currency,  bold=False, italic=False)
+                set_cell_text(cells[5], total_str, bold=False, italic=False)
+            else:
+                # Empty row — clear all cells
+                for cell in cells:
+                    set_cell_text(cell, "", bold=False, italic=False)
 
-            details = item.get("details", "").strip()
-            if details:
-                new_p = copy.deepcopy(first_para._p)
-                desc_cell._tc.append(new_p)
-                second_para = desc_cell.paragraphs[-1]
-                for run in second_para.runs:
-                    run.text = ""
-                    rPr = run._r.find(qn('w:rPr'))
-                    if rPr is not None:
-                        run._r.remove(rPr)
-                dr = second_para.add_run(details)
-                dr.bold = False
-                dr.italic = False
-                dr.font.name = "Verdana"
-                dr.font.size = Pt(10)
-
-            set_cell_text(cells[0], str(pos),  bold=False, italic=False)
-            set_cell_text(cells[2], qty_str,   bold=False, italic=False)
-            set_cell_text(cells[3], price_str, bold=False, italic=False)
-            set_cell_text(cells[4], currency,  bold=False, italic=False)
-            set_cell_text(cells[5], total_str, bold=False, italic=False)
-            remove_row_borders(new_row)
-
-        # Total row — bold, double top border, first 4 cells no bottom border
-        new_tr = copy.deepcopy(table.rows[0]._tr)
-        table._tbl.append(new_tr)
-        total_row = table.rows[-1]
+        # Total row (row 16) — already in template, just fill values
+        total_row = table.rows[MAX_ROWS + 1]
         tcells = total_row.cells
-        total_str  = f"{grand_total:.2f},-"
+        total_str   = f"{grand_total:.2f},-"
         total_label = f"TOTAL PRICE \u2013 {delivery_terms} -"
-
-        set_cell_text(tcells[0], "",           bold=True, italic=False)
-        set_cell_text(tcells[1], total_label,  bold=True, italic=False)
-        set_cell_text(tcells[2], "",           bold=True, italic=False)
-        set_cell_text(tcells[3], "",           bold=True, italic=False)
-        set_cell_text(tcells[4], currency,     bold=True, italic=False)
-        set_cell_text(tcells[5], total_str,    bold=True, italic=False)
-
-        # Cells 0–3: double top border, no bottom border
-        for idx, cell in enumerate(tcells):
-            set_cell_borders(cell, top_val='double', bottom_val='nil',
-                             left_val='nil', right_val='nil', top_double=True)
-            add_no_wrap(cell)
+        set_cell_text(tcells[0], total_label, bold=True, italic=False)
+        set_cell_text(tcells[1], currency,    bold=True, italic=False)
+        set_cell_text(tcells[2], total_str,   bold=True, italic=False)
 
         # ── Terms table (Table 1) ──
         terms_table = doc.tables[1]
