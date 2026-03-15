@@ -97,10 +97,10 @@ def load_delivery_terms():
 @st.cache_data(ttl=60)
 def load_existing_offerta_numbers():
     r = requests.get(f"{SUPABASE_URL}/rest/v1/offerte", headers=HEADERS,
-        params={"select": "number"})
+        params={"select": "offer_number"})
     try:
         d = r.json()
-        return [x["number"] for x in d] if isinstance(d, list) else []
+        return [x["offer_number"] for x in d if x.get("offer_number")] if isinstance(d, list) else []
     except:
         return []
 
@@ -112,7 +112,7 @@ def get_next_offerta_number():
 
 def save_offerta(offerta_number, client_company, total_amount, currency):
     payload = {
-        "number": offerta_number,
+        "offer_number": offerta_number,
         "client_company": client_company,
     }
     r = requests.post(
