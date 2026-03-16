@@ -242,12 +242,35 @@ if include_attn:
     with col_n:
         full_name = st.text_input("Full Name (optional)")
 
-# ── 4. CRATE DIMENSIONS ───────────────────────
-st.subheader("4. Crate Dimensions")
-crate_dimensions = st.text_input(
-    "Crate dimensions (cm)", value="",
-    placeholder="e.g. 120 x 80 x 90"
+# ── 4. ALL CONTAINED IN ───────────────────────
+st.subheader("4. All contained in:")
+
+if "container_options" not in st.session_state:
+    st.session_state.container_options = [
+        "One wooden crate [dimensions] cms",
+        "One carton box [dimensions] cms",
+        "One pallet [dimensions] cms",
+    ]
+
+container_choice = st.selectbox(
+    "Container type",
+    st.session_state.container_options + ["— add new —"]
 )
+
+if container_choice == "— add new —":
+    new_container = st.text_input("New container description", placeholder="e.g. Two wooden crates [dimensions] cms")
+    if new_container and st.button("➕ Add to list"):
+        st.session_state.container_options.append(new_container)
+        st.rerun()
+    container_choice = new_container or ""
+
+# If the chosen option contains [dimensions], show a dimensions input
+crate_dimensions = ""
+if "[dimensions]" in container_choice:
+    crate_dimensions = st.text_input("Dimensions (cm)", value="", placeholder="e.g. 120 x 80 x 90")
+    container_line = container_choice.replace("[dimensions]", crate_dimensions.strip()) if crate_dimensions.strip() else container_choice
+else:
+    container_line = container_choice
 
 # ── 5. LINE ITEMS (from fattura) ──────────────
 st.subheader("5. Line Items")
@@ -396,6 +419,10 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         }
         for para in doc.paragraphs:
             replace_in_paragraph(para, other_replacements)
+        # Replace the "All contained in:" line
+        for para in doc.paragraphs:
+            if "One wooden crate" in para.text or "[dimensions]" in para.text:
+                replace_in_paragraph(para, {para.text.strip(): container_line})
 
         # ── Product table ──
         table    = doc.tables[0]
