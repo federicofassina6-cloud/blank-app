@@ -49,36 +49,6 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-def load_products():
-    response = requests.get(
-        f"{SUPABASE_URL}/rest/v1/products",
-        headers=HEADERS,
-        params={"select": "id,description,description_eng,net_weight_kg,dimensions,category",
-                "order": "category.asc,created_at.asc"}
-    )
-    try:
-        data = response.json()
-        if isinstance(data, list):
-            return data
-    except:
-        pass
-    return []
-
-def load_customers():
-    response = requests.get(
-        f"{SUPABASE_URL}/rest/v1/customers",
-        headers=HEADERS,
-        params={"select": "id,company_name,contact_name,salutation,address,city,zip,region,country",
-                "order": "company_name.asc"}
-    )
-    try:
-        data = response.json()
-        if isinstance(data, list):
-            return data
-    except:
-        pass
-    return []
-
 def load_fatture():
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/fatture",
@@ -94,13 +64,30 @@ def load_fatture():
         pass
     return []
 
+def load_fattura_items(fattura_id):
+    """Load line items saved when the fattura was generated."""
+    response = requests.get(
+        f"{SUPABASE_URL}/rest/v1/fattura_items",
+        headers=HEADERS,
+        params={"fattura_id": f"eq.{fattura_id}",
+                "select": "description,description_it,qty,net_weight_kg,dimensions",
+                "order": "created_at.asc"}
+    )
+    try:
+        data = response.json()
+        if isinstance(data, list):
+            return data
+    except:
+        pass
+    return []
+
 def load_pl_numbers():
-    year_2digit = date.today().strftime('%y')
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/packing_lists",
         headers=HEADERS,
         params={"select": "pl_number"}
     )
+    year_2digit = date.today().strftime('%y')
     try:
         d = r.json()
         if isinstance(d, list):
@@ -159,11 +146,6 @@ def replace_in_paragraph(para, replacements):
         for run in para.runs[1:]:
             run.text = ""
 
-def set_para_bold(para, bold):
-    for run in para.runs:
-        if run.text.strip():
-            run.bold = bold
-
 def delete_para(para):
     p = para._p
     p.getparent().remove(p)
@@ -171,46 +153,14 @@ def delete_para(para):
 # ─────────────────────────────────────────────
 # LOAD DATA
 # ─────────────────────────────────────────────
-if "products_db" not in st.session_state:
-    st.session_state.products_db = load_products()
-if "customers_db" not in st.session_state:
-    st.session_state.customers_db = load_customers()
 if "fatture_db" not in st.session_state:
     st.session_state.fatture_db = load_fatture()
 
-PRODUCTS = st.session_state.products_db
-CATEGORIES = []
-seen_cats = []
-for p in PRODUCTS:
-    cat = p.get("category") or "Other"
-    if cat not in seen_cats:
-        seen_cats.append(cat)
-        CATEGORIES.append(cat)
-
-PRODUCT_NAMES = ["— custom —"]
-PRODUCT_MAP   = {}
-for cat in CATEGORIES:
-    cat_products = [p for p in PRODUCTS if (p.get("category") or "Other") == cat]
-    for p in cat_products:
-        eng = p.get("description_eng") or p.get("description", "")
-        label = eng[:60] + ("…" if len(eng) > 60 else "")
-        PRODUCT_MAP[len(PRODUCT_NAMES)] = p
-        PRODUCT_NAMES.append(label)
-
 # ─────────────────────────────────────────────
-# SESSION STATE
+# SESSION STATE for gross weight overrides
 # ─────────────────────────────────────────────
-if "pl_line_items" not in st.session_state:
-    st.session_state.pl_line_items = [
-        {"product_idx": 0, "description": "", "description_it": "",
-         "qty": 1.0, "net_weight": 0.0, "gross_weight": 0.0, "dimensions": ""}
-    ]
-
-def add_line():
-    st.session_state.pl_line_items.append(
-        {"product_idx": 0, "description": "", "description_it": "",
-         "qty": 1.0, "net_weight": 0.0, "gross_weight": 0.0, "dimensions": ""}
-    )
+if "pl_gross_weights" not in st.session_state:
+    st.session_state.pl_gross_weights = {}
 
 # ─────────────────────────────────────────────
 # UI
@@ -219,10 +169,10 @@ st.title("📦 Packing List Generator")
 
 # ── 1. PACKING LIST NUMBER ────────────────────
 st.subheader("1. Packing List Number")
-year_2digit = date.today().strftime('%y')
-next_pl_num = load_pl_numbers()
+year_2digit  = date.today().strftime('%y')
+next_pl_num  = load_pl_numbers()
 suggested_pl = f"{next_pl_num:03d}/{year_2digit}"
-pl_number = st.text_input("Packing List Number (used in filename only)", value=suggested_pl)
+pl_number    = st.text_input("Packing List Number (used in filename only)", value=suggested_pl)
 
 # ── 2. LINK TO FATTURA ────────────────────────
 st.subheader("2. Link to Fattura")
@@ -232,106 +182,55 @@ col_fat, col_fat_refresh = st.columns([5, 1])
 with col_fat:
     if not fatture:
         st.warning("No fatture found in Supabase.")
-        sel_fattura_idx = 0
-        fattura_labels  = ["— none —"]
-    else:
-        fattura_labels = [
-            f"{f['invoice_number']} — {f['client_company']} ({f['created_at'][:10]})"
-            for f in fatture
-        ]
-        sel_fattura_idx = st.selectbox(
-            "Select Fattura",
-            range(len(fattura_labels)),
-            format_func=lambda i: fattura_labels[i],
-            key="fattura_picker"
-        )
+        st.stop()
+    fattura_labels = [
+        f"{f['invoice_number']} — {f['client_company']} ({f['created_at'][:10]})"
+        for f in fatture
+    ]
+    sel_fattura_idx = st.selectbox(
+        "Select Fattura",
+        range(len(fattura_labels)),
+        format_func=lambda i: fattura_labels[i],
+        key="fattura_picker"
+    )
 with col_fat_refresh:
     st.write("")
     if st.button("🔄", help="Reload fatture"):
         st.session_state.fatture_db = load_fatture()
+        st.session_state.pl_gross_weights = {}
         st.rerun()
 
-if fatture:
-    sel_fattura    = fatture[sel_fattura_idx]
-    invoice_number = sel_fattura.get("invoice_number", "")
-    client_company = sel_fattura.get("client_company", "")
-    fat_date_raw   = sel_fattura.get("created_at", "")
-    fat_address    = sel_fattura.get("address", "") or ""
-    fat_zip        = sel_fattura.get("zip", "") or ""
-    fat_city       = sel_fattura.get("city", "") or ""
-    fat_region     = sel_fattura.get("region", "") or ""
-    fat_country    = sel_fattura.get("country", "") or ""
-    try:
-        fattura_date = date.fromisoformat(fat_date_raw[:10]).strftime("%d/%m/%Y")
-    except:
-        fattura_date = fat_date_raw[:10]
-    st.caption(f"📄 Invoice: **{invoice_number}** | Client: **{client_company}** | Date: **{fattura_date}**")
-else:
-    invoice_number = ""
-    client_company = ""
-    fattura_date   = date.today().strftime("%d/%m/%Y")
-    fat_address = fat_zip = fat_city = fat_region = fat_country = ""
+sel_fattura    = fatture[sel_fattura_idx]
+fattura_id     = sel_fattura.get("id", "")
+invoice_number = sel_fattura.get("invoice_number", "")
+client_company = sel_fattura.get("client_company", "")
+fat_date_raw   = sel_fattura.get("created_at", "")
+try:
+    fattura_date = date.fromisoformat(fat_date_raw[:10]).strftime("%d/%m/%Y")
+except:
+    fattura_date = fat_date_raw[:10]
 
-# ── 3. CLIENT ─────────────────────────────────
+st.caption(f"📄 Invoice: **{invoice_number}** | Client: **{client_company}** | Date: **{fattura_date}**")
+
+# ── 3. CLIENT (auto from fattura, no picker) ──
 st.subheader("3. Client")
 
-customers      = st.session_state.customers_db
-customer_names = ["— new customer —"] + [
-    f"{c.get('company_name', '')} ({c.get('contact_name', '')})" for c in customers
-]
+company  = client_company
+address  = sel_fattura.get("address", "") or ""
+zip_code = sel_fattura.get("zip", "") or ""
+city     = sel_fattura.get("city", "") or ""
+region   = sel_fattura.get("region", "") or ""
+country  = sel_fattura.get("country", "") or ""
 
-# Auto-match customer from fattura's client_company
-default_cust_idx = 0
-for i, c in enumerate(customers):
-    if c.get("company_name", "").strip().lower() == client_company.strip().lower():
-        default_cust_idx = i + 1
-        break
-
-col_cust, col_refresh = st.columns([5, 1])
-with col_cust:
-    selected_customer_idx = st.selectbox(
-        "Pick existing customer or fill in manually",
-        range(len(customer_names)),
-        format_func=lambda x: customer_names[x],
-        key="cust_picker",
-        index=default_cust_idx
-    )
-with col_refresh:
-    st.write("")
-    if st.button("🔄", help="Reload customers", key="reload_cust"):
-        st.session_state.customers_db = load_customers()
-        st.rerun()
-
-if selected_customer_idx > 0:
-    cust = customers[selected_customer_idx - 1]
-    default_company    = cust.get("company_name", "")
-    default_address    = cust.get("address", "") or fat_address
-    default_zip        = cust.get("zip", "") or fat_zip
-    default_city       = cust.get("city", "") or fat_city
-    default_region     = cust.get("region", "") or fat_region or ""
-    default_country    = cust.get("country", "") or fat_country
-    default_salutation = cust.get("salutation", "Mr.") or "Mr."
-    default_full_name  = cust.get("contact_name", "") or ""
-else:
-    default_company    = client_company
-    default_address    = fat_address
-    default_zip        = fat_zip
-    default_city       = fat_city
-    default_region     = fat_region
-    default_country    = fat_country
-    default_salutation = "Mr."
-    default_full_name  = ""
-
-company = st.text_input("Company Name *", value=default_company)
-address = st.text_input("Address", value=default_address)
-col3, col4, col5 = st.columns(3)
-with col3:
-    zip_code = st.text_input("Zip", value=default_zip)
-with col4:
-    city = st.text_input("City", value=default_city)
-with col5:
-    region = st.text_input("Region", value=default_region, placeholder="(optional)")
-country = st.text_input("Country", value=default_country)
+col1, col2 = st.columns(2)
+with col1:
+    company  = st.text_input("Company",  value=company)
+    address  = st.text_input("Address",  value=address)
+    zip_code = st.text_input("ZIP",      value=zip_code)
+with col2:
+    city    = st.text_input("City",    value=city)
+    region  = st.text_input("Region",  value=region,  placeholder="(optional)")
+    country = st.text_input("Country", value=country)
 
 include_attn = st.checkbox("Include 'To the attn. of' line?", value=False)
 salutation = ""
@@ -339,11 +238,9 @@ full_name  = ""
 if include_attn:
     col_s, col_n = st.columns([1, 3])
     with col_s:
-        sal_opts = ["Mr.", "Ms.", "Dr.", "Messrs."]
-        sal_idx  = sal_opts.index(default_salutation) if default_salutation in sal_opts else 0
-        salutation = st.selectbox("Salutation", sal_opts, index=sal_idx)
+        salutation = st.selectbox("Salutation", ["Mr.", "Ms.", "Dr.", "Messrs."])
     with col_n:
-        full_name = st.text_input("Full Name (optional)", value=default_full_name)
+        full_name = st.text_input("Full Name (optional)")
 
 # ── 4. CRATE DIMENSIONS ───────────────────────
 st.subheader("4. Crate Dimensions")
@@ -352,91 +249,67 @@ crate_dimensions = st.text_input(
     placeholder="e.g. 120 x 80 x 90"
 )
 
-# ── 5. LINE ITEMS ─────────────────────────────
+# ── 5. LINE ITEMS (from fattura) ──────────────
 st.subheader("5. Line Items")
-st.caption("Select from catalogue. Net weight auto-fills from database.")
 
-items_to_remove = []
-needs_rerun = False
+fattura_items = load_fattura_items(fattura_id)
 
-for i, item in enumerate(st.session_state.pl_line_items):
-    with st.container():
-        c1, c2, c3, c4 = st.columns([3, 1.5, 1.5, 0.4])
-        with c1:
-            prod_idx = st.selectbox(
-                f"Product #{i+1}",
-                range(len(PRODUCT_NAMES)),
-                format_func=lambda x: PRODUCT_NAMES[x],
-                key=f"pl_prod_{i}",
-                index=item["product_idx"]
-            )
-            if prod_idx != item["product_idx"]:
-                item["product_idx"] = prod_idx
-                if prod_idx > 0 and prod_idx in PRODUCT_MAP:
-                    p = PRODUCT_MAP[prod_idx]
-                    item["description"]    = p.get("description_eng") or p.get("description", "")
-                    item["description_it"] = p.get("description", "")
-                    nw = p.get("net_weight_kg")
-                    item["net_weight"]     = float(nw) if nw is not None else 0.0
-                    item["gross_weight"]   = item["net_weight"]
-                    item["dimensions"]     = p.get("dimensions") or ""
-                else:
-                    item["description"]    = ""
-                    item["description_it"] = ""
-                    item["net_weight"]     = 0.0
-                    item["gross_weight"]   = 0.0
-                    item["dimensions"]     = ""
-                needs_rerun = True
+if not fattura_items:
+    st.warning("⚠️ No line items found for this fattura. Make sure you generated the fattura with the updated app so items are saved to Supabase.")
+    valid_items = []
+else:
+    st.caption(f"✅ {len(fattura_items)} item(s) loaded from fattura {invoice_number}")
 
-            # Show Italian name + dimensions as captions
-            if prod_idx > 0 and prod_idx in PRODUCT_MAP:
-                p_sel = PRODUCT_MAP[prod_idx]
-                it_name = p_sel.get("description", "")
-                if it_name:
-                    st.caption(f"🇮🇹 {it_name}")
-                if p_sel.get("dimensions"):
-                    st.caption(f"📐 {p_sel['dimensions']}")
+    # Show items with editable gross weight only
+    valid_items = []
+    for i, item in enumerate(fattura_items):
+        desc    = item.get("description", "")
+        desc_it = item.get("description_it", "")
+        qty     = float(item.get("qty") or 0)
+        nw      = float(item.get("net_weight_kg") or 0)
+        dims    = item.get("dimensions") or ""
 
-            if prod_idx == 0:
-                item["description"] = st.text_input(
-                    "Custom Product Name (EN)", value=item.get("description", ""),
-                    key=f"pl_desc_{i}")
-                item["description_it"] = st.text_input(
-                    "Custom Product Name (IT)", value=item.get("description_it", ""),
-                    key=f"pl_desc_it_{i}")
+        # Gross weight: default = net weight, user can override
+        gw_key = f"gw_{fattura_id}_{i}"
+        if gw_key not in st.session_state.pl_gross_weights:
+            st.session_state.pl_gross_weights[gw_key] = nw
 
-        with c2:
-            item["qty"] = st.number_input(
-                "Qty", min_value=0.0, value=float(item["qty"]),
-                step=1.0, format="%.1f", key=f"pl_qty_{i}")
+        with st.container():
+            c1, c2, c3, c4 = st.columns([3, 1, 2, 2])
+            with c1:
+                st.write(f"**{desc}**")
+                if desc_it:
+                    st.caption(f"🇮🇹 {desc_it}")
+                if dims:
+                    st.caption(f"📐 {dims}")
+            with c2:
+                st.write("**Qty**")
+                st.write(f"{int(qty):,},0" if qty == int(qty) else str(qty))
+            with c3:
+                st.write("**Net Weight (kg)**")
+                st.write(fmt_weight(nw) + " kg" if nw else "—")
+            with c4:
+                gross = st.number_input(
+                    "Gross Weight (kg)", min_value=0.0,
+                    value=float(st.session_state.pl_gross_weights[gw_key]),
+                    step=0.01, format="%.2f", key=f"pl_gw_{i}"
+                )
+                st.session_state.pl_gross_weights[gw_key] = gross
 
-        with c3:
-            st.write("**Net Weight (kg)**")
-            st.write(fmt_weight(item["net_weight"]) + " kg" if item["net_weight"] else "—")
-            item["gross_weight"] = st.number_input(
-                "Gross Weight (kg)", min_value=0.0, value=float(item["gross_weight"]),
-                step=0.01, format="%.2f", key=f"pl_gw_{i}")
+            line_net   = qty * nw
+            line_gross = qty * gross
+            st.caption(f"Line net: {fmt_weight(line_net)} kg  |  Line gross: {fmt_weight(line_gross)} kg")
+            st.divider()
 
-        with c4:
-            st.write("")
-            st.write("")
-            if st.button("🗑", key=f"pl_del_{i}"):
-                items_to_remove.append(i)
+            valid_items.append({
+                "description": desc,
+                "description_it": desc_it,
+                "qty":         qty,
+                "net_weight":  nw,
+                "gross_weight": gross,
+                "dimensions":  dims,
+            })
 
-        line_net   = item["qty"] * item["net_weight"]
-        line_gross = item["qty"] * item["gross_weight"]
-        st.caption(f"Line net: {fmt_weight(line_net)} kg  |  Line gross: {fmt_weight(line_gross)} kg")
-        st.divider()
-
-for i in sorted(items_to_remove, reverse=True):
-    st.session_state.pl_line_items.pop(i)
-if items_to_remove or needs_rerun:
-    st.rerun()
-
-st.button("➕ Add Line Item", on_click=add_line)
-
-valid_items = [it for it in st.session_state.pl_line_items
-               if it.get("description", "").strip() and it["qty"] > 0]
 total_net   = sum(it["qty"] * it["net_weight"]   for it in valid_items)
 total_gross = sum(it["qty"] * it["gross_weight"] for it in valid_items)
 
@@ -445,21 +318,6 @@ with col_nw:
     st.markdown(f"### ⚖️ Total Net: {fmt_weight(total_net)} kg")
 with col_gw:
     st.markdown(f"### ⚖️ Total Gross: {fmt_weight(total_gross)} kg")
-
-# ── PREVIEW TABLE ─────────────────────────────
-if valid_items:
-    st.subheader("Preview")
-    preview_data = []
-    for it in valid_items:
-        preview_data.append({
-            "Product": it["description"],
-            "Qty": f"{it['qty']:.1f}",
-            "Net Wt (kg)": fmt_weight(it["net_weight"]),
-            "Gross Wt (kg)": fmt_weight(it["gross_weight"]),
-            "Line Net": fmt_weight(it["qty"] * it["net_weight"]),
-            "Line Gross": fmt_weight(it["qty"] * it["gross_weight"]),
-        })
-    st.table(preview_data)
 
 # ── 6. DOCUMENT NAME ──────────────────────────
 st.subheader("6. Document Name")
@@ -472,7 +330,7 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
     if not company:
         st.warning("Please enter a company name.")
     elif not valid_items:
-        st.warning("Please add at least one line item.")
+        st.warning("Please select a fattura with line items.")
     else:
         zip_city = f"{zip_code} {city}".strip()
         if region:
@@ -495,16 +353,25 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
-        # Bold only company, not the rest
+        # Bold only company, everything else not bold
         for para in doc.paragraphs:
             full = "".join(r.text for r in para.runs)
-            if company.upper() in full:
-                set_para_bold(para, True)
-            elif full.strip() and full.strip() not in [
-                "Messrs.", "PACKING LIST", "Covering the shipment of:",
-                "GOODS OF ITALIAN ORIGIN", "All contained in:"
-            ]:
-                set_para_bold(para, False)
+            if company.upper() in full and full.strip() == company.upper():
+                for run in para.runs:
+                    run.bold = True
+                    run.font.name = "Verdana"
+                    run.font.size = Pt(10)
+            elif full.strip() in ["", "Messrs.", "PACKING LIST",
+                                   "Covering the shipment of:",
+                                   "GOODS OF ITALIAN ORIGIN",
+                                   "All contained in:"]:
+                pass
+            else:
+                for run in para.runs:
+                    if run.text.strip():
+                        run.bold = False
+                        run.font.name = "Verdana"
+                        run.font.size = Pt(10)
 
         # Attn line — delete if not needed
         for para in doc.paragraphs:
@@ -512,12 +379,15 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
                 if include_attn and (salutation or full_name):
                     attn_text = f"To the attn. of {salutation} {full_name}".strip().replace("  ", " ")
                     replace_in_paragraph(para, {"To the attn. of [Sal.] [Full Name]": attn_text})
-                    set_para_bold(para, False)
+                    for run in para.runs:
+                        run.bold = False
+                        run.font.name = "Verdana"
+                        run.font.size = Pt(10)
                 else:
                     delete_para(para)
                 break
 
-        # Invoice ref, dimensions, weights — re-fetch paras after possible deletion
+        # Invoice ref, dimensions, weights
         other_replacements = {
             "[NNN/YY]":            invoice_number,
             "[DD/MM/YYYY]":        fattura_date,
@@ -532,10 +402,10 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         MAX_ROWS = 15
 
         for row_idx in range(1, MAX_ROWS + 1):
-            row   = table.rows[row_idx]
-            cells = row.cells
-
+            row      = table.rows[row_idx]
+            cells    = row.cells
             item_idx = row_idx - 1
+
             if item_idx < len(valid_items):
                 item = valid_items[item_idx]
 
@@ -549,19 +419,17 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
                 r_name.bold      = True
                 r_name.font.name = "Verdana"
                 r_name.font.size = Pt(10)
-                dims = item.get("dimensions", "")
-                if dims:
+                if item.get("dimensions"):
                     new_p = copy.deepcopy(first_para._p)
                     desc_cell._tc.append(new_p)
                     dim_para = desc_cell.paragraphs[-1]
                     for run in dim_para.runs:
                         run.text = ""
-                    r_dim = dim_para.add_run(dims)
+                    r_dim = dim_para.add_run(item["dimensions"])
                     r_dim.bold      = False
                     r_dim.font.name = "Verdana"
                     r_dim.font.size = Pt(10)
 
-                # Qty: Italian format e.g. "1,0"
                 qty_val = item["qty"]
                 qty_str = f"{int(qty_val)},0" if qty_val == int(qty_val) else f"{qty_val:.1f}".replace(".", ",")
 
@@ -573,7 +441,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
             else:
                 for cell in cells:
                     set_cell_text(cell, "")
-                # Collapse empty rows
                 trPr = row._tr.find(qn('w:trPr'))
                 if trPr is None:
                     trPr = OxmlElement('w:trPr')
