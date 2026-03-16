@@ -69,9 +69,9 @@ def get_next_invoice_number():
 
 def save_fattura(invoice_number, client_company, total_amount, currency,
                   address="", zip_code="", city="", region="", country=""):
-    requests.post(
+    r = requests.post(
         f"{SUPABASE_URL}/rest/v1/fatture",
-        headers=HEADERS,
+        headers={**HEADERS, "Prefer": "return=minimal"},
         json={
             "invoice_number": invoice_number,
             "client_company": client_company,
@@ -85,6 +85,8 @@ def save_fattura(invoice_number, client_company, total_amount, currency,
             "country": country,
         }
     )
+    if not r.ok:
+        st.warning(f"⚠️ Could not save to Supabase: {r.status_code} {r.text}")
 
 def load_products():
     response = requests.get(
@@ -105,7 +107,7 @@ def load_customers():
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/customers",
         headers=HEADERS,
-        params={"select": "id,company_name,contact_name,salutation,address,city,zip,country,vat_number",
+        params={"select": "id,company_name,contact_name,salutation,address,city,zip,state,country,vat_number",
                 "order": "company_name.asc"}
     )
     try:
@@ -361,11 +363,13 @@ if selected_customer_idx > 0:
     default_address  = cust.get("address", "")
     default_zip      = cust.get("zip", "")
     default_city     = cust.get("city", "")
+    default_region   = cust.get("state", "") or ""
     default_country  = cust.get("country", "")
     default_vat      = cust.get("vat_number", "")
 else:
     default_company = default_address = default_zip = ""
     default_city = default_country = default_vat = ""
+    default_region = ""
 
 company    = st.text_input("Company Name *", value=default_company)
 address    = st.text_input("Address", value=default_address)
@@ -375,7 +379,7 @@ with col3:
 with col4:
     city = st.text_input("City", value=default_city)
 with col5:
-    region = st.text_input("Region", placeholder="(optional)")
+    region = st.text_input("Region", value=default_region, placeholder="(optional)")
 country    = st.text_input("Country", value=default_country)
 vat_number = st.text_input("Tax ID / VAT code / Partita IVA", value=default_vat)
 
