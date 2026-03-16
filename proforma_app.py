@@ -238,6 +238,11 @@ def collapse_para(para):
     sp.set(qn('w:line'), '120'); sp.set(qn('w:lineRule'), 'exact')
     pPr.append(sp)
 
+def delete_para(para):
+    """Remove the paragraph from the document entirely."""
+    p = para._p
+    p.getparent().remove(p)
+
 # ─── SESSION STATE ───────────────────────────
 if "line_items" not in st.session_state:
     st.session_state.line_items = [
@@ -467,8 +472,8 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                     r.bold=True; r.font.name="Verdana"; r.font.size=Pt(10)
                 continue
 
-            # "To the attn" — show or collapse
-            if "To the attn. of" in para.text:
+            # "To the attn" — show or delete entirely (only the dedicated attn line, not body text)
+            if para.text.strip().startswith("To the attn."):
                 if include_attn and (sal or full_name):
                     para.clear()
                     attn_text = f"To the attn. of {sal or ''} {full_name or ''}".strip().replace("  ", " ")
@@ -477,7 +482,7 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                     run.font.name = "Verdana"
                     run.font.size = Pt(10)
                 else:
-                    collapse_para(para)
+                    delete_para(para)
                 continue
             
             # Company — BOLD
