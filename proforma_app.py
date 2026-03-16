@@ -468,7 +468,7 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                 continue
 
             # "To the attn" — show or collapse
-            if "To the attn. of" in para.text or "All'attenzione" in para.text:
+            if "To the attn. of" in para.text:
                 if include_attn and (sal or full_name):
                     para.clear()
                     attn_text = f"To the attn. of {sal or ''} {full_name or ''}".strip().replace("  ", " ")
