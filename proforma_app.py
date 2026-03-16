@@ -468,17 +468,18 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                 continue
 
             # "To the attn" — show or collapse
-            if "attn" in full.lower() or "attenzione" in full.lower():
+            if "To the attn. of" in para.text or "All'attenzione" in para.text:
                 if include_attn and (sal or full_name):
                     para.clear()
-                    rp = para.add_run(f"To the attn. of {sal} ".strip())
-                    rp.bold=False; rp.font.name="Verdana"; rp.font.size=Pt(10)
-                    rn = para.add_run(full_name)
-                    rn.bold=False; rn.font.name="Verdana"; rn.font.size=Pt(10)
+                    attn_text = f"To the attn. of {sal or ''} {full_name or ''}".strip().replace("  ", " ")
+                    run = para.add_run(attn_text)
+                    run.bold = False
+                    run.font.name = "Verdana"
+                    run.font.size = Pt(10)
                 else:
                     collapse_para(para)
                 continue
-
+            
             # Company — BOLD
             if company and company in full:
                 set_run(para, company, bold=True)
