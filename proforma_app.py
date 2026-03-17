@@ -88,11 +88,37 @@ def get_next_number():
     return f"{len(this_yr)+1:03d}/{yr}"
 
 def save_proforma(num, company, total, currency, date_of_reference=None):
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/fatture_proforma", headers={**HDR, "Prefer": "return=minimal"},
-        json={"proforma_number":num,"client_company":company,"total_amount":total,"currency":currency,"status":"not_sent",
-              "date_of_reference":date_of_reference})
+    # Ensure date_of_reference is a plain string in YYYY-MM-DD format
+    if date_of_reference is None:
+        date_str = None
+    elif isinstance(date_of_reference, str):
+        date_str = date_of_reference
+    elif hasattr(date_of_reference, "strftime"):
+        date_str = date_of_reference.strftime("%Y-%m-%d")
+    else:
+        date_str = str(date_of_reference)
+
+    payload = {
+        "proforma_number": num,
+        "client_company": company,
+        "total_amount": total,
+        "currency": currency,
+        "status": "not_sent",
+        "date_of_reference": date_str,
+    }
+    r = requests.post(
+        f"{SUPABASE_URL}/rest/v1/fatture_proforma",
+        headers={**HDR, "Prefer": "return=representation"},
+        json=payload,
+    )
     if not r.ok:
-        st.warning(f"⚠️ Could not save: {r.status_code} {r.text}")
+        st.warning(f"⚠️ Could not save to Supabase: {r.status_code} — {r.text}")
+    else:
+        saved = r.json()
+        if isinstance(saved, list) and saved:
+            saved_date = saved[0].get("date_of_reference")
+            if not saved_date:
+                st.warning("⚠️ Row saved but date_of_reference is still null. Check Supabase column permissions.")
     load_existing_numbers.clear()
 
 def save_delivery_term(term):
@@ -229,7 +255,6 @@ def set_cell(cell, text, bold=False, fn="Verdana", fs=10):
     r.bold = bold; r.font.name = fn; r.font.size = Pt(fs)
 
 def collapse_para(para):
-    """Set paragraph spacing to 0 so it takes no space."""
     para.clear()
     pPr = para._p.find(qn('w:pPr'))
     if pPr is None:
@@ -242,7 +267,6 @@ def collapse_para(para):
     pPr.append(sp)
 
 def delete_para(para):
-    """Remove the paragraph from the document entirely."""
     p = para._p
     p.getparent().remove(p)
 
@@ -269,7 +293,15 @@ with col_l:
 st.subheader(f"1. {L['date']} & {L['nlabel']}")
 cd1, cd2 = st.columns(2)
 with cd1:
-    sel_date = st.date_input(L["date"], value=date.today(), format="DD/MM/YYYY")
+    sel_date_raw = st.date_input(L["date"], value=date.today(), format="DD/MM/YYYY")
+    # Normalise: date_input can return a tuple on some Streamlit versions
+    if isinstance(sel_date_raw, (list, tuple)):
+        sel_date = sel_date_raw[0] if sel_date_raw else date.today()
+    else:
+        sel_date = sel_date_raw
+    # Store in session state so it survives reruns
+    st.session_state["sel_date"] = sel_date
+
 with cd2:
     yr2 = sel_date.strftime('%y')
     suggested = get_next_number()
@@ -431,6 +463,12 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
     elif not any(it["description"].strip() for it in st.session_state.line_items):
         st.warning(L["witems"])
     else:
+        # Retrieve the date safely from session state
+        final_date = st.session_state.get("sel_date", date.today())
+        if isinstance(final_date, (list, tuple)):
+            final_date = final_date[0] if final_date else date.today()
+        date_str = final_date.strftime("%Y-%m-%d")
+
         zip_city = f"{zip_code} {city}".strip()
         if region: zip_city += f", {region}"
 
@@ -456,11 +494,9 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         for para in doc.paragraphs:
             replace_para(para, reps)
 
-        # Fix all paragraphs
         for para in doc.paragraphs:
             full = "".join(r.text for r in para.runs)
 
-            # Para 0: date line — NOT bold
             if para == doc.paragraphs[0]:
                 para.clear()
                 r1 = para.add_run("Schio, ")
@@ -469,35 +505,28 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                 r2.bold=False; r2.font.name="Verdana"; r2.font.size=Pt(10)
                 continue
 
-            # PROFORMA INVOICE NO line — BOLD
             if "PROFORMA INVOICE NO" in full or "FATTURA PROFORMA N" in full or "PROFORMA" in full.upper() and "N" in full.upper() and pnum in full:
                 for r in para.runs:
                     r.bold=True; r.font.name="Verdana"; r.font.size=Pt(10)
                 continue
 
-            # "To the attn" — show or delete entirely (only the dedicated attn line, not body text)
             if para.text.strip().startswith("To the attn."):
                 if include_attn and (sal or full_name):
                     para.clear()
                     attn_text = f"To the attn. of {sal or ''} {full_name or ''}".strip().replace("  ", " ")
                     run = para.add_run(attn_text)
-                    run.bold = False
-                    run.font.name = "Verdana"
-                    run.font.size = Pt(10)
+                    run.bold = False; run.font.name = "Verdana"; run.font.size = Pt(10)
                 else:
                     delete_para(para)
                 continue
-            
-            # Company — BOLD
+
             if company and company in full:
                 set_run(para, company, bold=True)
                 continue
 
-            # Everything else — NOT bold
             for r in para.runs:
                 r.bold=False; r.font.name="Verdana"; r.font.size=Pt(10)
 
-        # Product table
         tbl = doc.tables[0]
         MAX = 15
         valid = [it for it in st.session_state.line_items if it["description"].strip()]
@@ -510,7 +539,6 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                 lt = it["qty"] * it["unit_price"]
                 qty_s = f"{it['qty']:,.1f}".replace(",","X").replace(".",",").replace("X",".")
                 set_cell(cells[0], str(ri*10))
-                # Description cell: bold name + normal details
                 dc = cells[1]
                 for p in dc.paragraphs:
                     for r in p.runs:
@@ -542,14 +570,12 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
                 trH.set(qn('w:val'),'1'); trH.set(qn('w:hRule'),'exact')
                 trPr.append(trH)
 
-        # Total row
         tr = tbl.rows[MAX+1]
         tc = tr.cells
         set_cell(tc[0], TOTAL_TPL.format(dt=dt), bold=True)
         set_cell(tc[4], currency, bold=True)
         set_cell(tc[5], fmt_it(grand_total), bold=True)
 
-        # Terms table
         tt = doc.tables[1]
         for ri2, val in {0:hs,1:pay,4:dt,5:dtime,6:pack,7:ship}.items():
             if ri2 < len(tt.rows):
@@ -558,7 +584,8 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         buf = io.BytesIO()
         doc.save(buf); buf.seek(0)
 
-        save_proforma(pnum, company, grand_total, currency, date_of_reference=sel_date.strftime("%Y-%m-%d"))
+        save_proforma(pnum, company, grand_total, currency, date_of_reference=date_str)
+
         if company.strip():
             save_customer(company, full_name, sal, address, city, zip_code, country)
             load_customers.clear()
