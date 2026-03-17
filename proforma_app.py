@@ -104,6 +104,7 @@ def save_proforma(num, company, total, currency, date_of_reference=None):
         "total_amount": total,
         "currency": currency,
         "status": "not_sent",
+        "date_reference": date_str,
         "date_of_reference": date_str,
     }
     r = requests.post(
