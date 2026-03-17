@@ -88,38 +88,20 @@ def get_next_number():
     return f"{len(this_yr)+1:03d}/{yr}"
 
 def save_proforma(num, company, total, currency, date_of_reference=None):
-    # Ensure date_of_reference is a plain string in YYYY-MM-DD format
-    if date_of_reference is None:
-        date_str = None
-    elif isinstance(date_of_reference, str):
-        date_str = date_of_reference
-    elif hasattr(date_of_reference, "strftime"):
-        date_str = date_of_reference.strftime("%Y-%m-%d")
-    else:
-        date_str = str(date_of_reference)
-
-    payload = {
-        "proforma_number": num,
-        "client_company": company,
-        "total_amount": total,
-        "currency": currency,
-        "status": "not_sent",
-        "date_reference": date_str,
-        "date_of_reference": date_str,
-    }
     r = requests.post(
         f"{SUPABASE_URL}/rest/v1/fatture_proforma",
         headers={**HDR, "Prefer": "return=representation"},
-        json=payload,
+        json={
+            "proforma_number": num,
+            "client_company": company,
+            "total_amount": total,
+            "currency": currency,
+            "status": "not_sent",
+            "date_of_reference": date_of_reference,
+        }
     )
     if not r.ok:
-        st.warning(f"⚠️ Could not save to Supabase: {r.status_code} — {r.text}")
-    else:
-        saved = r.json()
-        if isinstance(saved, list) and saved:
-            saved_date = saved[0].get("date_of_reference")
-            if not saved_date:
-                st.warning("⚠️ Row saved but date_of_reference is still null. Check Supabase column permissions.")
+        st.warning(f"⚠️ Could not save: {r.status_code} {r.text}")
     load_existing_numbers.clear()
 
 def save_delivery_term(term):
@@ -214,7 +196,6 @@ if "dt_db" not in st.session_state:
 
 PRODS = st.session_state.products_db
 
-# Flat product list — NO category separators
 PNAMES = ["— select product —"]
 PMAP   = {}
 for p in PRODS:
@@ -294,15 +275,7 @@ with col_l:
 st.subheader(f"1. {L['date']} & {L['nlabel']}")
 cd1, cd2 = st.columns(2)
 with cd1:
-    sel_date_raw = st.date_input(L["date"], value=date.today(), format="DD/MM/YYYY")
-    # Normalise: date_input can return a tuple on some Streamlit versions
-    if isinstance(sel_date_raw, (list, tuple)):
-        sel_date = sel_date_raw[0] if sel_date_raw else date.today()
-    else:
-        sel_date = sel_date_raw
-    # Store in session state so it survives reruns
-    st.session_state["sel_date"] = sel_date
-
+    sel_date = st.date_input(L["date"], value=date.today(), format="DD/MM/YYYY")
 with cd2:
     yr2 = sel_date.strftime('%y')
     suggested = get_next_number()
@@ -464,12 +437,6 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
     elif not any(it["description"].strip() for it in st.session_state.line_items):
         st.warning(L["witems"])
     else:
-        # Retrieve the date safely from session state
-        final_date = st.session_state.get("sel_date", date.today())
-        if isinstance(final_date, (list, tuple)):
-            final_date = final_date[0] if final_date else date.today()
-        date_str = final_date.strftime("%Y-%m-%d")
-
         zip_city = f"{zip_code} {city}".strip()
         if region: zip_city += f", {region}"
 
@@ -585,7 +552,8 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         buf = io.BytesIO()
         doc.save(buf); buf.seek(0)
 
-        save_proforma(pnum, company, grand_total, currency, date_of_reference=date_str)
+        save_proforma(pnum, company, grand_total, currency,
+                      date_of_reference=sel_date.strftime("%Y-%m-%d"))
 
         if company.strip():
             save_customer(company, full_name, sal, address, city, zip_code, country)
