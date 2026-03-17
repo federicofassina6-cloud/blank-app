@@ -276,7 +276,7 @@ st.subheader(f"1. {L['date']} & {L['nlabel']}")
 cd1, cd2 = st.columns(2)
 with cd1:
     sel_date = st.date_input(L["date"], value=date.today(), format="DD/MM/YYYY")
-    supabase_date = st.date_input("📅 Date of Reference (saved to database)", value=date.today(), format="DD/MM/YYYY", key="supabase_date")
+    supabase_date_raw = st.text_input("Date of Reference (DD/MM/YYYY)", value=date.today().strftime("%d/%m/%Y"), key="supabase_date")
 with cd2:
     yr2 = sel_date.strftime('%y')
     suggested = get_next_number()
@@ -553,8 +553,13 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         buf = io.BytesIO()
         doc.save(buf); buf.seek(0)
 
+        try:
+            d, m, y = supabase_date_raw.strip().split("/")
+            supabase_date = f"{y}-{m}-{d}"
+        except:
+            supabase_date = None
         save_proforma(pnum, company, grand_total, currency,
-                      date_of_reference=supabase_date.strftime("%Y-%m-%d"))
+                      date_of_reference=supabase_date)
 
         if company.strip():
             save_customer(company, full_name, sal, address, city, zip_code, country)
