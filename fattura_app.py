@@ -68,7 +68,7 @@ def get_next_invoice_number():
     return f"{next_num:03d}/{year_2digit}"
 
 def save_fattura(invoice_number, client_company, total_amount, currency,
-                 address="", zip_code="", city="", region="", country=""):
+                 address="", zip_code="", city="", region="", country="", date_of_reference=None):
     r = requests.post(
         f"{SUPABASE_URL}/rest/v1/fatture",
         headers={**HEADERS, "Prefer": "return=representation"},
@@ -83,6 +83,7 @@ def save_fattura(invoice_number, client_company, total_amount, currency,
             "city": city,
             "region": region,
             "country": country,
+            "date_of_reference": date_of_reference,
         }
     )
     if not r.ok:
@@ -778,7 +779,8 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
         # Save fattura + line items to Supabase
         fattura_id = save_fattura(
             invoice_number, company, grand_total, currency,
-            address, zip_code, city, region, country
+            address, zip_code, city, region, country,
+            date_of_reference=selected_date.strftime("%Y-%m-%d")
         )
         # Attach currency to items for save
         for it in st.session_state.fattura_line_items:
