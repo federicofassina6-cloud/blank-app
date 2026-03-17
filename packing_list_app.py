@@ -12,7 +12,6 @@ import requests
 st.set_page_config(page_title="Packing List Generator", layout="wide")
 
 def fmt_weight(n):
-    """Italian weight format: 1.000,– or 1,25 (2 decimal places)"""
     try:
         f = float(n)
     except (TypeError, ValueError):
@@ -65,7 +64,6 @@ def load_fatture():
     return []
 
 def load_fattura_items(fattura_id):
-    """Load line items saved when the fattura was generated."""
     response = requests.get(
         f"{SUPABASE_URL}/rest/v1/fattura_items",
         headers=HEADERS,
@@ -81,21 +79,26 @@ def load_fattura_items(fattura_id):
         pass
     return []
 
-def load_pl_numbers():
+def load_existing_pl_numbers():
+    """Return list of all existing pl_numbers."""
     r = requests.get(
         f"{SUPABASE_URL}/rest/v1/packing_lists",
         headers=HEADERS,
         params={"select": "pl_number"}
     )
-    year_2digit = date.today().strftime('%y')
     try:
         d = r.json()
         if isinstance(d, list):
-            this_year = [x["pl_number"] for x in d if str(x.get("pl_number", "")).endswith(f"/{year_2digit}")]
-            return len(this_year) + 1
+            return [x["pl_number"] for x in d if x.get("pl_number")]
     except:
         pass
-    return 1
+    return []
+
+def get_next_pl_number():
+    year_2digit = date.today().strftime('%y')
+    existing = load_existing_pl_numbers()
+    this_year = [x for x in existing if str(x).endswith(f"/{year_2digit}") and str(x).startswith("PL")]
+    return f"PL{len(this_year)+1:03d}/{year_2digit}"
 
 def save_pl_record(pl_number, client_company, date_of_reference=None, invoice_number=None):
     requests.post(
@@ -110,7 +113,7 @@ def save_pl_record(pl_number, client_company, date_of_reference=None, invoice_nu
     )
 
 # ─────────────────────────────────────────────
-# DOCX HELPERS  (identical to fattura app)
+# DOCX HELPERS
 # ─────────────────────────────────────────────
 def set_cell_text(cell, text, bold=False, italic=False, font_name="Verdana", font_size=10):
     tc = cell._tc
@@ -171,10 +174,44 @@ st.title("📦 Packing List Generator")
 
 # ── 1. PACKING LIST NUMBER ────────────────────
 st.subheader("1. Packing List Number")
-year_2digit  = date.today().strftime('%y')
-next_pl_num  = load_pl_numbers()
-suggested_pl = f"{next_pl_num:03d}/{year_2digit}"
-pl_number    = st.text_input("Packing List Number (used in filename only)", value=suggested_pl)
+year_2digit   = date.today().strftime('%y')
+existing_pls  = load_existing_pl_numbers()
+suggested_pl  = get_next_pl_number()
+
+# Extract trailing number for sequential check
+def extract_pl_seq(pl):
+    try:
+        return int(pl.replace("PL", "").split("/")[0])
+    except:
+        return None
+
+pl_number = st.text_input(
+    "Packing List Number (used in filename only)",
+    value=suggested_pl,
+    help="Format: PL001/26. Must be unique."
+)
+
+# Validation
+pl_error   = None
+pl_warning = None
+
+if pl_number:
+    # Duplicate check — hard block
+    if pl_number.strip() in existing_pls:
+        pl_error = f'❌ "{pl_number}" already exists. Please use a different number.'
+    else:
+        # Sequential check — amber warning only
+        input_seq = extract_pl_seq(pl_number.strip())
+        suggested_seq = extract_pl_seq(suggested_pl)
+        if input_seq is not None and suggested_seq is not None and input_seq != suggested_seq:
+            pl_warning = f"⚠️ Expected next number to be {suggested_pl}, but you entered {pl_number}. You can still proceed."
+
+if pl_error:
+    st.error(pl_error)
+elif pl_warning:
+    st.warning(pl_warning)
+
+number_ok = pl_error is None
 
 # ── 2. LINK TO FATTURA ────────────────────────
 st.subheader("2. Link to Fattura")
@@ -214,7 +251,7 @@ except:
 
 st.caption(f"📄 Invoice: **{invoice_number}** | Client: **{client_company}** | Date of Reference: **{fattura_date or '—'}**")
 
-# ── 3. CLIENT (auto from fattura, no picker) ──
+# ── 3. CLIENT ─────────────────────────────────
 st.subheader("3. Client")
 
 company  = client_company
@@ -230,9 +267,9 @@ with col1:
     address  = st.text_input("Address",  value=address)
     zip_code = st.text_input("ZIP",      value=zip_code)
 with col2:
-    city    = st.text_input("City",    value=city)
-    region  = st.text_input("Region",  value=region,  placeholder="(optional)")
-    country = st.text_input("Country", value=country)
+    city    = st.text_input("City",              value=city)
+    region  = st.text_input("Region / Province", value=region, placeholder="(optional)")
+    country = st.text_input("Country",           value=country)
 
 include_attn = st.checkbox("Include 'To the attn. of' line?", value=False)
 salutation = ""
@@ -273,7 +310,7 @@ if "[dimensions]" in container_choice:
 else:
     container_line = container_choice
 
-# ── 5. LINE ITEMS (from fattura) ──────────────
+# ── 5. LINE ITEMS ─────────────────────────────
 st.subheader("5. Line Items")
 
 fattura_items = load_fattura_items(fattura_id)
@@ -324,12 +361,12 @@ else:
             st.divider()
 
             valid_items.append({
-                "description":  desc,
+                "description":    desc,
                 "description_it": desc_it,
-                "qty":          qty,
-                "net_weight":   nw,
-                "gross_weight": gross,
-                "dimensions":   dims,
+                "qty":            qty,
+                "net_weight":     nw,
+                "gross_weight":   gross,
+                "dimensions":     dims,
             })
 
 total_net   = sum(it["qty"] * it["net_weight"]   for it in valid_items)
@@ -348,7 +385,7 @@ doc_name = st.text_input("File name (without .docx)", value=default_name)
 
 # ── GENERATE ──────────────────────────────────
 st.divider()
-if st.button("📥 Generate Packing List", type="primary", use_container_width=True):
+if st.button("📥 Generate Packing List", type="primary", use_container_width=True, disabled=not number_ok):
     if not company:
         st.warning("Please enter a company name.")
     elif not valid_items:
@@ -365,7 +402,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
             st.error(f"❌ Template not found: {e}")
             st.stop()
 
-        # ── Header paragraphs ──
         header_replacements = {
             "[COMPANY NAME]": company.upper(),
             "[Address]":      address,
@@ -375,7 +411,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
-        # Bold only company, everything else not bold
         for para in doc.paragraphs:
             full = "".join(r.text for r in para.runs)
             if company.upper() in full and full.strip() == company.upper():
@@ -395,7 +430,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
                         run.font.name = "Verdana"
                         run.font.size = Pt(10)
 
-        # Attn line — delete if not needed
         for para in doc.paragraphs:
             if para.text.strip().startswith("To the attn."):
                 if include_attn and (salutation or full_name):
@@ -409,7 +443,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
                     delete_para(para)
                 break
 
-        # Invoice ref, dimensions, weights
         other_replacements = {
             "[NNN/YY]":            invoice_number,
             "[DD/MM/YYYY]":        fattura_date,
@@ -419,12 +452,10 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         for para in doc.paragraphs:
             replace_in_paragraph(para, other_replacements)
 
-        # Replace the "All contained in:" line
         for para in doc.paragraphs:
             if "One wooden crate" in para.text or "[dimensions]" in para.text:
                 replace_in_paragraph(para, {para.text.strip(): container_line})
 
-        # ── Product table ──
         table    = doc.tables[0]
         MAX_ROWS = 15
 
