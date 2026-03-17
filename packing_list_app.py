@@ -97,12 +97,16 @@ def load_pl_numbers():
         pass
     return 1
 
-def save_pl_record(pl_number, client_company, date_of_reference=None):
+def save_pl_record(pl_number, client_company, date_of_reference=None, invoice_number=None):
     requests.post(
         f"{SUPABASE_URL}/rest/v1/packing_lists",
         headers={**HEADERS, "Prefer": "return=minimal"},
-        json={"pl_number": pl_number, "client_company": client_company,
-              "date_of_reference": date_of_reference}
+        json={
+            "pl_number": pl_number,
+            "client_company": client_company,
+            "date_of_reference": date_of_reference,
+            "invoice_number": invoice_number,
+        }
     )
 
 # ─────────────────────────────────────────────
@@ -157,9 +161,6 @@ def delete_para(para):
 if "fatture_db" not in st.session_state:
     st.session_state.fatture_db = load_fatture()
 
-# ─────────────────────────────────────────────
-# SESSION STATE for gross weight overrides
-# ─────────────────────────────────────────────
 if "pl_gross_weights" not in st.session_state:
     st.session_state.pl_gross_weights = {}
 
@@ -209,9 +210,9 @@ fat_date_raw   = sel_fattura.get("date_of_reference") or ""
 try:
     fattura_date = date.fromisoformat(fat_date_raw[:10]).strftime("%d/%m/%Y")
 except:
-    fattura_date = fat_date_raw[:10]
+    fattura_date = ""
 
-st.caption(f"📄 Invoice: **{invoice_number}** | Client: **{client_company}** | Date: **{fattura_date}**")
+st.caption(f"📄 Invoice: **{invoice_number}** | Client: **{client_company}** | Date of Reference: **{fattura_date or '—'}**")
 
 # ── 3. CLIENT (auto from fattura, no picker) ──
 st.subheader("3. Client")
@@ -265,7 +266,6 @@ if container_choice == "— add new —":
         st.rerun()
     container_choice = new_container or ""
 
-# If the chosen option contains [dimensions], show a dimensions input
 crate_dimensions = ""
 if "[dimensions]" in container_choice:
     crate_dimensions = st.text_input("Dimensions (cm)", value="", placeholder="e.g. 120 x 80 x 90")
@@ -284,7 +284,6 @@ if not fattura_items:
 else:
     st.caption(f"✅ {len(fattura_items)} item(s) loaded from fattura {invoice_number}")
 
-    # Show items with editable gross weight only
     valid_items = []
     for i, item in enumerate(fattura_items):
         desc    = item.get("description", "")
@@ -293,7 +292,6 @@ else:
         nw      = float(item.get("net_weight_kg") or 0)
         dims    = item.get("dimensions") or ""
 
-        # Gross weight: default = net weight, user can override
         gw_key = f"gw_{fattura_id}_{i}"
         if gw_key not in st.session_state.pl_gross_weights:
             st.session_state.pl_gross_weights[gw_key] = nw
@@ -326,12 +324,12 @@ else:
             st.divider()
 
             valid_items.append({
-                "description": desc,
+                "description":  desc,
                 "description_it": desc_it,
-                "qty":         qty,
-                "net_weight":  nw,
+                "qty":          qty,
+                "net_weight":   nw,
                 "gross_weight": gross,
-                "dimensions":  dims,
+                "dimensions":   dims,
             })
 
 total_net   = sum(it["qty"] * it["net_weight"]   for it in valid_items)
@@ -399,7 +397,7 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
 
         # Attn line — delete if not needed
         for para in doc.paragraphs:
-            if "To the attn. of" in para.text:
+            if para.text.strip().startswith("To the attn."):
                 if include_attn and (salutation or full_name):
                     attn_text = f"To the attn. of {salutation} {full_name}".strip().replace("  ", " ")
                     replace_in_paragraph(para, {"To the attn. of [Sal.] [Full Name]": attn_text})
@@ -420,6 +418,7 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         }
         for para in doc.paragraphs:
             replace_in_paragraph(para, other_replacements)
+
         # Replace the "All contained in:" line
         for para in doc.paragraphs:
             if "One wooden crate" in para.text or "[dimensions]" in para.text:
@@ -437,7 +436,6 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
             if item_idx < len(valid_items):
                 item = valid_items[item_idx]
 
-                # Description cell: product name bold, dimensions below if available
                 desc_cell  = cells[1]
                 for para in desc_cell.paragraphs:
                     for run in para.runs:
@@ -485,7 +483,12 @@ if st.button("📥 Generate Packing List", type="primary", use_container_width=T
         doc.save(buffer)
         buffer.seek(0)
 
-        save_pl_record(pl_number, company, date_of_reference=fat_date_raw[:10] if fat_date_raw else None)
+        save_pl_record(
+            pl_number,
+            company,
+            date_of_reference=fat_date_raw[:10] if fat_date_raw else None,
+            invoice_number=invoice_number,
+        )
 
         st.success(f"✅ Packing List {pl_number} ready!")
         st.download_button(
