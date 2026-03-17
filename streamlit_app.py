@@ -35,7 +35,7 @@ if "language" not in st.session_state:
     st.session_state.language = None
 
 if st.session_state.language is None:
-    st.title("📄 Offerta / Proforma Invoice Generator")
+    st.title("📄 Offerta Generator")
     st.subheader("Select language / Seleziona lingua")
     col_en, col_it = st.columns(2)
     with col_en:
@@ -169,7 +169,7 @@ def fmt_price_it(value: float) -> str:
 # ─────────────────────────────────────────────
 if LANG == "en":
     TEMPLATE_FILE = "offerta_template_eng.docx"
-    TITLE         = "📄 Offer / Proforma Invoice Generator 🇬🇧"
+    TITLE         = "📄 Offer Generator 🇬🇧"
     TOTAL_LABEL_TPL = "TOTAL PRICE \u2013 {dt} \u2013"
     PAYMENT_OPTIONS = [
         "In advance by T/t transfer",
