@@ -61,7 +61,6 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# ── Cached loaders (TTL 5 min) ──────────────
 @st.cache_data(ttl=300)
 def load_products():
     r = requests.get(f"{SUPABASE_URL}/rest/v1/products", headers=HEADERS,
@@ -107,8 +106,9 @@ def load_existing_offerta_numbers():
 def get_next_offerta_number():
     year_2digit = date.today().strftime('%y')
     existing = load_existing_offerta_numbers()
-    this_year = [n for n in existing if str(n).endswith(f"/{year_2digit}")]
-    return f"{len(this_year) + 1:03d}/{year_2digit}"
+    # Only count OF-prefixed numbers for this year
+    this_year = [n for n in existing if str(n).startswith("OF") and str(n).endswith(f"/{year_2digit}")]
+    return f"OF{len(this_year) + 1:03d}/{year_2digit}"
 
 def save_offerta(offerta_number, client_company, total_amount, currency, date_of_reference=None):
     payload = {
@@ -151,15 +151,11 @@ def save_customer(company_name, contact_name, salutation, email, phone, address,
 # ITALIAN PRICE FORMATTER
 # ─────────────────────────────────────────────
 def fmt_price_it(value: float) -> str:
-    """Format price Italian style: 1.000,50 or 1.000,– for round values."""
     if value == int(value):
-        # No cents — use ,–
         int_part = f"{int(value):,}".replace(",", ".")
         return f"{int_part},\u2013"
     else:
-        # Has cents
         formatted = f"{value:,.2f}"
-        # formatted is like "1,000.50" — convert to Italian
         int_part, dec_part = formatted.split(".")
         int_part = int_part.replace(",", ".")
         return f"{int_part},{dec_part}"
@@ -284,7 +280,7 @@ HS_CODES = ["8453.9000","8453.1000","8466.9195","8464.2019","8451.9000","8451.80
 CURRENCIES = ["EUR", "USD", "GBP", "CHF", "CNY", "RUB", LBL["custom"]]
 
 # ─────────────────────────────────────────────
-# LOAD DATA (cached)
+# LOAD DATA
 # ─────────────────────────────────────────────
 if "products_db" not in st.session_state:
     st.session_state.products_db = load_products()
@@ -302,7 +298,6 @@ for p in PRODUCTS:
         seen_cats.append(cat)
         CATEGORIES.append(cat)
 
-# Build product names — NO custom option
 PRODUCT_NAMES = ["— select product —"]
 PRODUCT_MAP   = {}
 for cat in CATEGORIES:
@@ -348,7 +343,6 @@ def replace_in_paragraph(para, replacements):
                 run.text = ""
 
 def set_para_run(para, text, bold=False, font_name="Verdana", font_size=10):
-    """Clear para and add a single run with given formatting."""
     para.clear()
     r = para.add_run(text)
     r.bold = bold
@@ -411,15 +405,14 @@ with col_d2:
         value=suggested_number,
         help=LBL["number_hint"]
     )
-    # Validate number
     number_ok = True
     if proforma_number in existing_numbers:
         st.error(LBL["number_dup"])
         number_ok = False
     else:
         try:
-            seq = int(proforma_number.split("/")[0])
-            expected = int(suggested_number.split("/")[0])
+            seq = int(proforma_number.replace("OF", "").split("/")[0])
+            expected = int(suggested_number.replace("OF", "").split("/")[0])
             if seq != expected:
                 st.warning(LBL["number_warn"])
         except:
@@ -462,7 +455,6 @@ else:
     default_full_name = default_company = default_address = ""
     default_zip = default_city = default_region = default_country = ""
 
-# "To the attention of" toggle
 include_attn = st.checkbox(LBL["attn_toggle"], value=True)
 
 if include_attn:
@@ -528,8 +520,6 @@ for i, item in enumerate(st.session_state.line_items):
                 format_func=lambda x: PRODUCT_NAMES[x],
                 key=f"prod_{i}", index=item["product_idx"]
             )
-            # Skip category separator headers — removed (no separators)
-
             if prod_idx != item["product_idx"]:
                 item["product_idx"] = prod_idx
                 if prod_idx > 0 and prod_idx in PRODUCT_MAP:
@@ -545,7 +535,6 @@ for i, item in enumerate(st.session_state.line_items):
                     item["unit_price"] = item["price_client"] = item["price_reseller"] = 0.0
                 needs_rerun = True
 
-            # Show both language descriptions as captions
             if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                 p_sel = PRODUCT_MAP[prod_idx]
                 ita = p_sel.get("description", "")
@@ -653,11 +642,9 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         for para in doc.paragraphs:
             replace_in_paragraph(para, header_replacements)
 
-        # ── Fix paragraph formatting — only company bold ──
         for para in doc.paragraphs:
             full = "".join(r.text for r in para.runs)
 
-            # Date paragraph (paragraph 0): "Schio, " normal + date normal (NOT bold)
             if para == doc.paragraphs[0]:
                 para.clear()
                 r1 = para.add_run("Schio, ")
@@ -666,7 +653,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
                 r2.bold = False; r2.font.name = "Verdana"; r2.font.size = Pt(10)
                 continue
 
-            # "To the attn of" paragraph
             if "To the attn. of" in full or "All'attenzione" in full:
                 if include_attn and (salutation or full_name):
                     para.clear()
@@ -675,29 +661,24 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
                     r_name = para.add_run(full_name)
                     r_name.bold = False; r_name.font.name = "Verdana"; r_name.font.size = Pt(10)
                 else:
-                    # Delete the paragraph entirely from the document XML
                     p = para._p
                     p.getparent().remove(p)
                 continue
 
-            # Offer number line — bold
             if "OFFER NO" in full or "OFFERTA Nr" in full:
                 for run in para.runs:
                     run.bold = True
                 continue
 
-            # Company name — bold
             if company and company in full:
                 set_para_run(para, company, bold=True)
                 continue
 
-            # All other header paragraphs — NOT bold, Verdana 10
             for run in para.runs:
                 run.bold = False
                 run.font.name = "Verdana"
                 run.font.size = Pt(10)
 
-        # ── Product table ──
         table    = doc.tables[0]
         MAX_ROWS = 15
         valid_items = [it for it in st.session_state.line_items if it["description"].strip()]
@@ -713,7 +694,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
                 price_str  = fmt_price_it(item["unit_price"])
                 total_str  = fmt_price_it(line_total)
                 set_cell_text(cells[0], str(pos), bold=False)
-                # Description: bold product name, normal details
                 desc_cell  = cells[1]
                 for para in desc_cell.paragraphs:
                     for run in para.runs:
@@ -739,7 +719,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
             else:
                 for cell in cells:
                     set_cell_text(cell, "")
-                # Collapse empty row
                 trPr = row._tr.find(qn('w:trPr'))
                 if trPr is None:
                     trPr = OxmlElement('w:trPr')
@@ -751,7 +730,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
                 trH.set(qn('w:val'), '1'); trH.set(qn('w:hRule'), 'exact')
                 trPr.append(trH)
 
-        # Total row
         total_row   = table.rows[MAX_ROWS + 1]
         tcells      = total_row.cells
         total_label = TOTAL_LABEL_TPL.format(dt=delivery_terms)
@@ -759,7 +737,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         set_cell_text(tcells[4], currency,    bold=True)
         set_cell_text(tcells[5], fmt_price_it(grand_total), bold=True)
 
-        # Terms table
         terms_table = doc.tables[1]
         terms_map   = {0: hs_code, 1: payment, 4: delivery_terms,
                        5: delivery_time, 6: packing, 7: shipment}
@@ -771,7 +748,8 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         doc.save(buffer)
         buffer.seek(0)
 
-        save_offerta(proforma_number, company, grand_total, currency, date_of_reference=selected_date.strftime("%Y-%m-%d"))
+        save_offerta(proforma_number, company, grand_total, currency,
+                     date_of_reference=selected_date.strftime("%Y-%m-%d"))
         if company.strip():
             save_customer(company, full_name, salutation, "", "", address, city, zip_code, country, "")
             load_customers.clear()
