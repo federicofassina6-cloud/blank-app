@@ -389,35 +389,54 @@ def set_cell_text(cell, text, bold=False, italic=False, font_name="Verdana", fon
 
 def bold_tc_heading(doc, heading_text):
     """
-    Find the Terms & Conditions / Condizioni Generali heading paragraph
-    anywhere in the document and force all its runs to bold.
+    Find T&C heading anywhere in the document and force bold.
+    Handles: split runs, text boxes, case variations.
     """
-    for para in doc.paragraphs:
+    heading_upper = heading_text.upper()
+
+    def _bold_para(para):
         full = "".join(r.text for r in para.runs)
-        if heading_text in full:
-            for run in para.runs:
-                run.bold = True
-                run.font.name = "Verdana"
-                run.font.size = Pt(10)
-            # If the full text was split across runs, consolidate into one bold run
-            if len(para.runs) > 1:
-                para.runs[0].text = full
-                for run in para.runs[1:]:
-                    run.text = ""
-            break
-    # Also check inside tables (some templates put T&C inside a table)
+        if heading_upper in full.upper():
+            para.runs[0].text = full
+            for r in para.runs[1:]:
+                r.text = ""
+            para.runs[0].bold = True
+            para.runs[0].font.name = "Verdana"
+            para.runs[0].font.size = Pt(10)
+            return True
+        return False
+
+    # 1. Body paragraphs
+    for para in doc.paragraphs:
+        if _bold_para(para): return
+
+    # 2. Table cells
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
-                    full = "".join(r.text for r in para.runs)
-                    if heading_text in full:
-                        for run in para.runs:
-                            run.bold = True
-                        if len(para.runs) > 1:
-                            para.runs[0].text = full
-                            for run in para.runs[1:]:
-                                run.text = ""
+                    if _bold_para(para): return
+
+    # 3. Text boxes / drawing objects
+    body = doc.element.body
+    for txbx in body.iter(qn('w:txbxContent')):
+        for p_el in txbx.iter(qn('w:p')):
+            runs_text = "".join(
+                t.text or ""
+                for r_el in p_el.iter(qn('w:r'))
+                for t in r_el.iter(qn('w:t'))
+            )
+            if heading_upper in runs_text.upper():
+                for r_el in p_el.iter(qn('w:r')):
+                    rPr = r_el.find(qn('w:rPr'))
+                    if rPr is None:
+                        rPr = OxmlElement('w:rPr')
+                        r_el.insert(0, rPr)
+                    b = rPr.find(qn('w:b'))
+                    if b is None:
+                        b = OxmlElement('w:b')
+                        rPr.append(b)
+                return
 
 # ─────────────────────────────────────────────
 # SESSION STATE
