@@ -514,10 +514,11 @@ for i, item in enumerate(st.session_state.fattura_line_items):
 
         # ── DISCOUNT LINE ──────────────────────────────────────────────
         if item.get("is_discount"):
-            st.markdown(f"**🏷️ Discount / Sconto #{i+1}**")
+            st.markdown(f"**📉 Deduction — Down Payment #{i+1}**")
+            st.caption("This deduction reduces the invoice total by the advance amount previously paid by the customer.")
 
             fatture_anticipo = st.session_state.fatture_anticipo_db
-            anticipo_options = ["— select fattura di anticipo —"] + [
+            anticipo_options = ["— select the advance payment invoice —"] + [
                 f"{f.get('invoice_number','')} — {f.get('client_company','')} ({f.get('currency','EUR')} {f.get('total_amount',0):,.2f})"
                 for f in fatture_anticipo
             ]
@@ -525,7 +526,7 @@ for i, item in enumerate(st.session_state.fattura_line_items):
             col_a1, col_a2 = st.columns([3, 0.4])
             with col_a1:
                 sel_anticipo_idx = st.selectbox(
-                    "Fattura di anticipo *",
+                    "Reference invoice (advance payment previously received) *",
                     range(len(anticipo_options)),
                     format_func=lambda x: anticipo_options[x],
                     key=f"anticipo_{i}"
@@ -619,17 +620,17 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 extra = EXTRA_ITEMS[prod_idx - EXTRA_ITEM_OFFSET]
                 st.caption(f"🇬🇧 {extra[0]} / 🇮🇹 {extra[1]}")
 
-            # Custom item fields — show only the relevant language field
+            # Custom item fields — fattura app is English-only for the document
+            # but stores both EN and IT descriptions for bilingual templates
             if prod_idx == 0:
                 item["description"] = st.text_input(
-                    "Custom Product Name (EN)" if LANG != "it" else "Custom Product Name (IT)",
-                    value=item.get("description","") if LANG != "it" else item.get("description_it",""),
+                    "Custom Product Name (EN — shown in document)",
+                    value=item.get("description", ""),
                     key=f"fattura_desc_{i}")
-                # Store in the right field depending on language
-                if LANG == "it":
-                    item["description_it"] = item["description"]
-                else:
-                    item["description_it"] = ""
+                item["description_it"] = st.text_input(
+                    "Custom Product Name (IT — for reference)",
+                    value=item.get("description_it", ""),
+                    key=f"fattura_desc_it_{i}")
 
             item["details"] = st.text_input(
                 "Description / Specs (optional)", value=item.get("details",""), key=f"fattura_details_{i}")
@@ -739,7 +740,7 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
     # Validate discount lines — must have a linked anticipo selected
     for i, it in enumerate(st.session_state.fattura_line_items):
         if it.get("is_discount") and not it.get("linked_anticipo"):
-            st.warning(f"⚠️ Discount #{i+1}: seleziona una Fattura di anticipo prima di generare. / Select a Fattura di anticipo before generating.")
+            st.warning(f"⚠️ Deduction line #{i+1}: please select the advance payment invoice this deduction refers to before generating.")
             st.stop()
 
     zip_city = f"{zip_code} {city}".strip()
