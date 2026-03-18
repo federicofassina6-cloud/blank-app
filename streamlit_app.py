@@ -847,6 +847,9 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         if row_idx < len(terms_table.rows):
             set_cell_text(terms_table.rows[row_idx].cells[1], value)
 
+    # ── Bold the T&C heading — MUST be last, after all table processing ──────
+    bold_tc_heading(doc, TC_HEADING)
+
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
