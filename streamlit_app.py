@@ -547,10 +547,11 @@ for i, item in enumerate(st.session_state.line_items):
                     item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
                     item["unit_price"]     = item["price_client"] if global_price_type == LBL["cliente"] else item["price_reseller"]
                     item["price_type"]     = global_price_type
+                    needs_rerun = True
                 else:
                     item["description"] = ""
                     item["unit_price"] = item["price_client"] = item["price_reseller"] = 0.0
-                needs_rerun = True
+                    # Don't rerun when switching to custom — let user type immediately
 
             if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                 p_sel = PRODUCT_MAP[prod_idx]
