@@ -12,14 +12,16 @@ import requests
 st.set_page_config(page_title="Fattura Generator", layout="wide")
 
 def fmt_price(n):
-    """Format number as European: 2.470,– """
-    formatted = f"{n:,.2f}"
+    """Format number as European: 2.470,– for whole numbers, 0,15 for decimals, -832,85 for negatives."""
+    sign = "-" if n < 0 else ""
+    abs_n = abs(n)
+    formatted = f"{abs_n:,.2f}"
     formatted = formatted.replace(",", "X").replace(".", ",").replace("X", ".")
     if formatted.endswith(",00"):
+        # Whole number — add the dash
         formatted = formatted[:-3] + ",–"
-    else:
-        formatted = formatted + "–"
-    return formatted
+    # else: has real decimal digits — no dash
+    return f"{sign}{formatted}"
 
 def fmt_qty(n):
     """Format quantity with comma: 1,0"""
@@ -617,31 +619,39 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 extra = EXTRA_ITEMS[prod_idx - EXTRA_ITEM_OFFSET]
                 st.caption(f"🇬🇧 {extra[0]} / 🇮🇹 {extra[1]}")
 
-            # Custom item fields
+            # Custom item fields — show only the relevant language field
             if prod_idx == 0:
                 item["description"] = st.text_input(
-                    "Custom Product Name (EN)", value=item.get("description",""), key=f"fattura_desc_{i}")
-                item["description_it"] = st.text_input(
-                    "Custom Product Name (IT)", value=item.get("description_it",""), key=f"fattura_desc_it_{i}")
+                    "Custom Product Name (EN)" if LANG != "it" else "Custom Product Name (IT)",
+                    value=item.get("description","") if LANG != "it" else item.get("description_it",""),
+                    key=f"fattura_desc_{i}")
+                # Store in the right field depending on language
+                if LANG == "it":
+                    item["description_it"] = item["description"]
+                else:
+                    item["description_it"] = ""
 
             item["details"] = st.text_input(
                 "Description / Specs (optional)", value=item.get("details",""), key=f"fattura_details_{i}")
 
-            # Unit price input — editable for all items (catalogue + extra + custom)
+            # Unit price — always editable; pre-filled from DB list price for catalogue items
+            is_catalogue = 0 < prod_idx < EXTRA_ITEM_OFFSET and prod_idx in PRODUCT_MAP
+            db_price = 0.0
+            if is_catalogue:
+                db_price = item.get("price_client", 0.0) if global_price_type == "Cliente" else item.get("price_reseller", 0.0)
+
             item["unit_price"] = st.number_input(
                 f"Unit Price ({currency})",
                 min_value=0.0,
-                value=float(item.get("unit_price", 0.0)),
+                value=float(item.get("unit_price", db_price if is_catalogue else 0.0)),
                 step=0.01, format="%.2f",
                 key=f"fattura_up_{i}"
             )
 
-            # Discount / surcharge indicator — only for catalogue items with a known DB price
-            is_catalogue = 0 < prod_idx < EXTRA_ITEM_OFFSET and prod_idx in PRODUCT_MAP
-            if is_catalogue:
-                db_price = item.get("price_client", 0.0) if global_price_type == "Cliente" else item.get("price_reseller", 0.0)
-                entered  = float(item.get("unit_price", 0.0))
-                if db_price and db_price > 0 and entered != db_price:
+            # Discount / surcharge indicator — only for catalogue items with known DB price
+            if is_catalogue and db_price > 0:
+                entered = float(item.get("unit_price", 0.0))
+                if abs(entered - db_price) > 0.001:
                     diff_pct = ((entered - db_price) / db_price) * 100
                     diff_abs = entered - db_price
                     if entered < db_price:
