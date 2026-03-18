@@ -462,8 +462,11 @@ for i, item in enumerate(st.session_state.line_items):
                     pc = float(p.get("unit_price_client") or 0)
                     pr = float(p.get("unit_price_reseller") or 0)
                     item["unit_price"] = pc if gpt == L["cli"] else pr
+                    item["price_client"] = pc
+                    item["price_reseller"] = pr
                 else:
                     item["description"]=""; item["unit_price"]=0.0
+                    item["price_client"]=0.0; item["price_reseller"]=0.0
                 needs_rerun = True
             if pidx > 0 and pidx in PMAP:
                 pp = PMAP[pidx]
@@ -482,11 +485,14 @@ for i, item in enumerate(st.session_state.line_items):
                 pc = float(p_ref.get("unit_price_client") or 0)
                 pr = float(p_ref.get("unit_price_reseller") or 0)
                 db_price = pc if gpt == L["cli"] else pr
+                # If unit_price hasn't been set yet (still 0) use db_price as default
+                if item.get("unit_price", 0.0) == 0.0 and db_price > 0:
+                    item["unit_price"] = db_price
 
             item["unit_price"] = st.number_input(
                 L["uprice"].format(c=currency),
                 min_value=0.0,
-                value=float(item.get("unit_price", db_price if is_cat else 0.0)),
+                value=float(item.get("unit_price", 0.0)),
                 step=0.01, format="%.2f",
                 key=f"up_{i}"
             )
@@ -647,9 +653,6 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         for r in para.runs:
             r.bold=False; r.font.name="Verdana"; r.font.size=Pt(10)
 
-    # ── Bold the T&C heading ────────────────
-    bold_tc_heading(doc, TC_HEADING)
-
     tbl = doc.tables[0]
     MAX = 15
     valid = [it for it in st.session_state.line_items if it["description"].strip()]
@@ -703,6 +706,10 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
     for ri2, val in {0:hs,1:pay,4:dt,5:dtime,6:pack,7:ship}.items():
         if ri2 < len(tt.rows):
             set_cell(tt.rows[ri2].cells[1], val)
+
+    # ── Bold the T&C heading — MUST be last, after all table processing ──────
+    # (table processing above calls set_cell which can overwrite bold)
+    bold_tc_heading(doc, TC_HEADING)
 
     buf = io.BytesIO()
     doc.save(buf); buf.seek(0)
