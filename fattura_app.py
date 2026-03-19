@@ -310,7 +310,7 @@ def add_line():
 def add_discount_line():
     st.session_state.fattura_line_items.append(
         {"product_idx":-1,"description":"DEDUCTION DOWN PAYMENT BY T/T",
-         "description_it":"Deduzione per anticipo a mezzo bonifico bancario",
+         "description_it":"DEDUZIONE PER ANTICIPO A MEZZO BONIFICO BANCARIO",
          "details":"","details_it":"","qty":1.0,"unit_price":0.0,"price_type":"Cliente",
          "is_discount":True,"discount_value":0.0,"linked_anticipo":None}
     )
@@ -555,7 +555,7 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                     item["description"]    = "DEDUCTION DOWN PAYMENT BY T/T"
                     item["details"]        = f"Our invoice no. {inv_num} dtd {inv_date}"
                     # IT description
-                    item["description_it"] = "Deduzione per anticipo a mezzo bonifico bancario"
+                    item["description_it"] = "DEDUZIONE PER ANTICIPO A MEZZO BONIFICO BANCARIO"
                     item["details_it"]     = f"Nostra fattura no. {inv_num} del {inv_date}"
                     item["linked_anticipo"] = inv_num
                     st.caption(f"🇬🇧 Description: {item['description']} | {item['details']}")
