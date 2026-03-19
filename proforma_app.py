@@ -468,7 +468,8 @@ for i, item in enumerate(st.session_state.line_items):
                     "Custom Product Name", value=item.get("description",""), key=f"desc_{i}")
             item["details"] = st.text_input(L["details"], value=item.get("details",""), key=f"d_{i}")
 
-            # Unit price — always editable; pre-filled from DB list price for catalogue items
+            # Unit price — always editable; pre-filled from DB list price for catalogue items.
+            # Key includes pidx so Streamlit creates a fresh widget when product changes.
             is_cat = pidx > 0 and pidx in PMAP
             db_price = 0.0
             if is_cat:
@@ -482,7 +483,7 @@ for i, item in enumerate(st.session_state.line_items):
                 min_value=0.0,
                 value=float(item.get("unit_price", 0.0)),
                 step=0.01, format="%.2f",
-                key=f"up_{i}"
+                key=f"up_{i}_{pidx}"
             )
 
             # Discount / surcharge indicator for catalogue items
@@ -695,12 +696,67 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         if ri2 < len(tt.rows):
             set_cell(tt.rows[ri2].cells[1], val)
 
-    # ── Bold the T&C heading — MUST be last, after all table processing ──────
-    # (table processing above calls set_cell which can overwrite bold)
-    bold_tc_heading(doc, TC_HEADING)
-
     buf = io.BytesIO()
     doc.save(buf); buf.seek(0)
+
+    # ── Bold T&C heading via direct XML string replacement ───────────────────
+    import zipfile, re as _re
+
+    def _inject_bold_in_xml(xml_bytes: bytes, heading: str) -> bytes:
+        """
+        Inject bold into any paragraph containing heading (case-insensitive).
+        Works by splitting on paragraph boundaries and checking joined w:t text.
+        """
+        try:
+            xml = xml_bytes.decode("utf-8")
+        except Exception:
+            return xml_bytes
+
+        heading_upper = heading.upper()
+
+        # Split XML on paragraph open tags — safer than greedy/lazy regex on large docs
+        # We reconstruct by splitting on </w:p> boundaries
+        parts = xml.split('</w:p>')
+        result = []
+        for part in parts:
+            # Extract all w:t content in this chunk
+            texts = _re.findall(r'<w:t[^>]*>([^<]*)</w:t>', part)
+            joined = "".join(texts).upper()
+            if heading_upper in joined:
+                # Found the heading paragraph — bold all runs in it
+                def _add_bold_to_rPr(rm):
+                    rPr = rm.group(0)
+                    # Strip existing bold attrs to avoid duplicates
+                    rPr = _re.sub(r'<w:b(?:Cs)?\s*(?:w:val="[^"]*")?\s*/>', '', rPr)
+                    rPr = rPr.replace('</w:rPr>', '<w:b w:val="1"/><w:bCs w:val="1"/></w:rPr>')
+                    return rPr
+
+                part = _re.sub(r'<w:rPr>.*?</w:rPr>', _add_bold_to_rPr, part, flags=_re.DOTALL)
+
+                # Runs with no <w:rPr> at all — inject one before <w:t
+                def _add_rPr_if_missing(rm):
+                    run = rm.group(0)
+                    if '<w:rPr>' not in run:
+                        run = run.replace('<w:t', '<w:rPr><w:b w:val="1"/><w:bCs w:val="1"/></w:rPr><w:t', 1)
+                    return run
+
+                part = _re.sub(r'<w:r\b[^>]*>.*?</w:r>', _add_rPr_if_missing, part, flags=_re.DOTALL)
+
+            result.append(part)
+
+        return '</w:p>'.join(result).encode("utf-8")
+
+    # Read the docx (zip), patch document.xml, write back
+    buf2 = io.BytesIO()
+    with zipfile.ZipFile(buf, 'r') as zin, zipfile.ZipFile(buf2, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for item_z in zin.infolist():
+            data = zin.read(item_z.name)
+            if item_z.name in ("word/document.xml", "word/header1.xml",
+                                "word/header2.xml", "word/footer1.xml",
+                                "word/footer2.xml"):
+                data = _inject_bold_in_xml(data, TC_HEADING)
+            zout.writestr(item_z, data)
+    buf2.seek(0)
 
     # FIX: use sel_date.isoformat() — date_input returns a date object,
     # strftime("%Y-%m-%d") is safe and avoids any timezone shift.
@@ -715,6 +771,6 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         st.session_state.customers_db = load_customers()
 
     st.success(L["ok"].format(n=pnum, c=currency, t=fmt_it(grand_total)))
-    st.download_button(label=L["dl"], data=buf, file_name=f"{doc_name}.docx",
+    st.download_button(label=L["dl"], data=buf2, file_name=f"{doc_name}.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         use_container_width=True)
