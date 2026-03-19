@@ -397,13 +397,16 @@ else:
     dsal="Mr."; dfn=dco=dad=dzip=dcity=dctry=""
 
 include_attn = st.checkbox(L["attn"], value=True)
+full_name = ""  # ensure always defined
 if include_attn:
     ca1, ca2 = st.columns([1,3])
     with ca1: sal = st.selectbox(L["sal"],["Mr.","Ms.","Dr.","Messrs."],
                                   index=["Mr.","Ms.","Dr.","Messrs."].index(dsal))
     with ca2: full_name = st.text_input(L["contact"], value=dfn)
+    if not full_name.strip():
+        st.warning(L["wattn"])
 else:
-    sal=""; full_name=""
+    sal=""
 
 company = st.text_input(L["company"], value=dco)
 address = st.text_input(L["addr"], value=dad)
@@ -573,11 +576,6 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
         st.warning(L["wcomp"])
         st.stop()
 
-    # Attn ticked but name left blank → friendly specific error
-    if include_attn and not full_name.strip():
-        st.warning(L["wattn"])
-        st.stop()
-
     if not any(it["description"].strip() for it in st.session_state.line_items):
         st.warning(L["witems"])
         st.stop()
@@ -610,6 +608,8 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
 
     for para in doc.paragraphs:
         full = "".join(r.text for r in para.runs)
+        # para.text catches text even when runs are empty or text is in w:t directly
+        para_text = para.text
 
         if para == doc.paragraphs[0]:
             para.clear()
@@ -639,8 +639,8 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
             set_run(para, company, bold=True)
             continue
 
-        # Skip T&C heading — leave it exactly as the template has it (bold)
-        if TC_HEADING.upper() in full.upper():
+        # Skip T&C heading — preserve template bold exactly as-is
+        if TC_HEADING.upper() in para_text.upper():
             continue
 
         for r in para.runs:
