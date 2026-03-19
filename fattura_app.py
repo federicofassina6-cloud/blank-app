@@ -796,9 +796,6 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
                 delete_para(para)
             break
 
-    # Check discount presence inside generate block
-    has_discount_line = any(it.get("is_discount") for it in st.session_state.fattura_line_items)
-
     # ── Table 0: Invoice details ──
     t0 = doc.tables[0]
     table0_replacements = {
@@ -807,8 +804,8 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
         "[Partita Iva/VAT Number]": vat_number or "—",
         "[Delivery terms]":         delivery_terms,
     }
-    # If this invoice has a deduction line, relabel the invoice header
-    if has_discount_line:
+    # When status is Fattura di anticipo, relabel the invoice header in the document
+    if status_choice == "Fattura di anticipo":
         table0_replacements["INVOICE No.:"]  = "INVOICE FOR ADVANCE PAYMENT No.:"
         table0_replacements["FATTURA N.:"]   = "FATTURA N. (anticipo):"
         table0_replacements["INVOICE NO.:"]  = "INVOICE FOR ADVANCE PAYMENT No.:"
