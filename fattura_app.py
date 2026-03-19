@@ -635,7 +635,8 @@ for i, item in enumerate(st.session_state.fattura_line_items):
             item["details"] = st.text_input(
                 "Description / Specs (optional)", value=item.get("details",""), key=f"fattura_details_{i}")
 
-            # Unit price — always editable; pre-filled from DB list price for catalogue items
+            # Unit price — always editable; pre-filled from DB list price for catalogue items.
+            # Key includes prod_idx so Streamlit creates a fresh widget when product changes.
             is_catalogue = 0 < prod_idx < EXTRA_ITEM_OFFSET and prod_idx in PRODUCT_MAP
             db_price = 0.0
             if is_catalogue:
@@ -646,7 +647,7 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 min_value=0.0,
                 value=float(item.get("unit_price", db_price if is_catalogue else 0.0)),
                 step=0.01, format="%.2f",
-                key=f"fattura_up_{i}"
+                key=f"fattura_up_{i}_{prod_idx}"
             )
 
             # Discount / surcharge indicator — only for catalogue items with known DB price
