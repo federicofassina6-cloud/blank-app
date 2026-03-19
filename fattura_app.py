@@ -709,15 +709,28 @@ if discount_total < 0:
 
 # ── 7. STATUS ──
 st.subheader("7. Invoice Status")
+
+# Check if any discount/deduction lines are present
+has_discount = any(it.get("is_discount") for it in st.session_state.fattura_line_items)
+
 # Three statuses: not_sent (default), sent, Fattura di anticipo (blue)
+# If a discount line is present, Fattura di anticipo is blocked
 status_options = {
-    "not_sent":           "⬜ Not Sent",
-    "sent":               "✅ Sent",
-    "Fattura di anticipo":"🔵 Fattura di anticipo",
+    "not_sent": "⬜ Not Sent",
+    "sent":     "✅ Sent",
+    "Fattura di anticipo": "🔵 Fattura di anticipo",
 }
+
+if has_discount:
+    # Only allow not_sent and sent — this invoice has a deduction so it cannot be an advance invoice
+    available_statuses = ["not_sent", "sent"]
+    st.caption("ℹ️ *Fattura di anticipo* status is not available when a deduction line is present.")
+else:
+    available_statuses = list(status_options.keys())
+
 status_choice = st.radio(
     "Status",
-    list(status_options.keys()),
+    available_statuses,
     format_func=lambda x: status_options[x],
     horizontal=True,
     key="fattura_status"
@@ -783,6 +796,9 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
                 delete_para(para)
             break
 
+    # Check discount presence inside generate block
+    has_discount_line = any(it.get("is_discount") for it in st.session_state.fattura_line_items)
+
     # ── Table 0: Invoice details ──
     t0 = doc.tables[0]
     table0_replacements = {
@@ -791,6 +807,11 @@ if st.button("📥 Generate Fattura", type="primary", use_container_width=True):
         "[Partita Iva/VAT Number]": vat_number or "—",
         "[Delivery terms]":         delivery_terms,
     }
+    # If this invoice has a deduction line, relabel the invoice header
+    if has_discount_line:
+        table0_replacements["INVOICE No.:"]  = "INVOICE FOR ADVANCE PAYMENT No.:"
+        table0_replacements["FATTURA N.:"]   = "FATTURA N. (anticipo):"
+        table0_replacements["INVOICE NO.:"]  = "INVOICE FOR ADVANCE PAYMENT No.:"
     for row in t0.rows:
         for cell in row.cells:
             replace_in_table_cell(cell, table0_replacements)
