@@ -286,56 +286,45 @@ def delete_para(para):
 
 def bold_tc_heading(doc, heading_text):
     """
-    Find T&C heading anywhere in the document and force bold.
-    Handles: split runs, text boxes, headers/footers, case variations.
+    Scan every paragraph in the document at raw XML level.
+    If the paragraph's full text contains heading_text (case-insensitive),
+    force ALL its runs bold by injecting <w:b/> into their <w:rPr>.
+    Covers body paragraphs, table cells, text boxes, headers, footers.
+    Does NOT consolidate runs — leaves structure intact.
     """
     heading_upper = heading_text.upper()
 
-    def _bold_para(para):
-        full = "".join(r.text for r in para.runs)
-        if heading_upper in full.upper():
-            # Consolidate into one run so formatting is clean
-            para.runs[0].text = full
-            for r in para.runs[1:]:
-                r.text = ""
-            para.runs[0].bold = True
-            para.runs[0].font.name = "Verdana"
-            para.runs[0].font.size = Pt(10)
-            return True
-        return False
+    def _force_bold_para_xml(p_el):
+        """Given a raw <w:p> element, bold all its runs if it contains the heading."""
+        # Collect all text from w:t descendants
+        texts = [t.text or "" for t in p_el.iter(qn('w:t'))]
+        full = "".join(texts)
+        if heading_upper not in full.upper():
+            return False
+        # Bold every w:r in this paragraph
+        for r_el in p_el.findall('.//' + qn('w:r')):
+            rPr = r_el.find(qn('w:rPr'))
+            if rPr is None:
+                rPr = OxmlElement('w:rPr')
+                r_el.insert(0, rPr)
+            # Remove any existing <w:b> or <w:bCs> first, then re-add
+            for tag in (qn('w:b'), qn('w:bCs')):
+                existing = rPr.find(tag)
+                if existing is not None:
+                    rPr.remove(existing)
+                elem = OxmlElement(tag)
+                elem.set(qn('w:val'), '1')
+                rPr.append(elem)
+        return True
 
-    # 1. Body paragraphs
-    for para in doc.paragraphs:
-        if _bold_para(para): return
-
-    # 2. Table cells
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    if _bold_para(para): return
-
-    # 3. Text boxes / drawing objects in body
-    from docx.oxml.ns import nsmap as _nsmap
-    body = doc.element.body
-    for txbx in body.iter(qn('w:txbxContent')):
-        for p_el in txbx.iter(qn('w:p')):
-            runs_text = "".join(
-                r.text for r in p_el.iter(qn('w:r'))
-                for t in r.iter(qn('w:t'))
-                for text in [t.text or ""]
-            )
-            if heading_upper in runs_text.upper():
-                for r_el in p_el.iter(qn('w:r')):
-                    rPr = r_el.find(qn('w:rPr'))
-                    if rPr is None:
-                        rPr = OxmlElement('w:rPr')
-                        r_el.insert(0, rPr)
-                    b = rPr.find(qn('w:b'))
-                    if b is None:
-                        b = OxmlElement('w:b')
-                        rPr.append(b)
-                return
+    # Walk the entire document XML — body, tables, text boxes, headers, footers
+    root = doc.element
+    found = False
+    for p_el in root.iter(qn('w:p')):
+        if _force_bold_para_xml(p_el):
+            found = True
+            # Don't break — heading may appear in multiple locations (e.g. header + body)
+    return found
 
 # ─── SESSION STATE ───────────────────────────
 if "line_items" not in st.session_state:
@@ -467,6 +456,8 @@ for i, item in enumerate(st.session_state.line_items):
                 else:
                     item["description"]=""; item["unit_price"]=0.0
                     item["price_client"]=0.0; item["price_reseller"]=0.0
+                # Delete the widget key so number_input reinitialises with the new price
+                st.session_state.pop(f"up_{i}", None)
                 needs_rerun = True
             if pidx > 0 and pidx in PMAP:
                 pp = PMAP[pidx]
@@ -485,9 +476,6 @@ for i, item in enumerate(st.session_state.line_items):
                 pc = float(p_ref.get("unit_price_client") or 0)
                 pr = float(p_ref.get("unit_price_reseller") or 0)
                 db_price = pc if gpt == L["cli"] else pr
-                # If unit_price hasn't been set yet (still 0) use db_price as default
-                if item.get("unit_price", 0.0) == 0.0 and db_price > 0:
-                    item["unit_price"] = db_price
 
             item["unit_price"] = st.number_input(
                 L["uprice"].format(c=currency),
