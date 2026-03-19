@@ -750,10 +750,11 @@ if st.button(L["gen"], type="primary", use_container_width=True, disabled=not nu
     buf2 = io.BytesIO()
     with zipfile.ZipFile(buf, 'r') as zin, zipfile.ZipFile(buf2, 'w', zipfile.ZIP_DEFLATED) as zout:
         for item_z in zin.infolist():
-            data = zin.read(item_z.name)
-            if item_z.name in ("word/document.xml", "word/header1.xml",
-                                "word/header2.xml", "word/footer1.xml",
-                                "word/footer2.xml"):
+            fname = item_z.filename
+            data = zin.read(fname)
+            if fname in ("word/document.xml", "word/header1.xml",
+                         "word/header2.xml", "word/footer1.xml",
+                         "word/footer2.xml"):
                 data = _inject_bold_in_xml(data, TC_HEADING)
             zout.writestr(item_z, data)
     buf2.seek(0)
