@@ -587,10 +587,12 @@ for i, item in enumerate(st.session_state.line_items):
                     item["price_reseller"] = float(p.get("unit_price_reseller") or 0)
                     item["unit_price"]     = item["price_client"] if global_price_type == LBL["cliente"] else item["price_reseller"]
                     item["price_type"]     = global_price_type
-                    needs_rerun = True
                 else:
                     item["description"] = ""
                     item["unit_price"] = item["price_client"] = item["price_reseller"] = 0.0
+                # Drop widget key so number_input reinitialises with new list price
+                st.session_state.pop(f"up_{i}_{prod_idx}", None)
+                needs_rerun = True
 
             if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                 p_sel = PRODUCT_MAP[prod_idx]
@@ -609,14 +611,42 @@ for i, item in enumerate(st.session_state.line_items):
             item["details"] = st.text_input(
                 LBL["details"], value=item.get("details", ""), key=f"details_{i}")
 
+            # Editable unit price for catalogue items — key includes prod_idx so it
+            # reinitialises with the DB list price whenever the product changes
+            if prod_idx > 0 and prod_idx in PRODUCT_MAP:
+                db_price = item.get("price_client", 0.0) if global_price_type == LBL["cliente"] else item.get("price_reseller", 0.0)
+                item["unit_price"] = st.number_input(
+                    f"Unit Price ({currency})",
+                    min_value=0.0,
+                    value=float(item.get("unit_price", db_price)),
+                    step=0.01, format="%.2f",
+                    key=f"up_{i}_{prod_idx}"
+                )
+                # Discount / surcharge indicator
+                if db_price > 0:
+                    entered = float(item.get("unit_price", 0.0))
+                    if abs(entered - db_price) > 0.001:
+                        diff_pct = ((entered - db_price) / db_price) * 100
+                        diff_abs = entered - db_price
+                        if entered < db_price:
+                            st.caption(
+                                f"🔴 Discount: −{currency} {fmt_price_it(abs(diff_abs))} "
+                                f"({abs(diff_pct):.1f}% below list price of {currency} {fmt_price_it(db_price)})"
+                            )
+                        else:
+                            st.caption(
+                                f"🟢 Surcharge: +{currency} {fmt_price_it(diff_abs)} "
+                                f"({diff_pct:.1f}% above list price of {currency} {fmt_price_it(db_price)})"
+                            )
+
         with c2:
             item["qty"] = st.number_input(
                 LBL["qty"], min_value=0.0, value=float(item["qty"]),
                 step=1.0, format="%.1f", key=f"qty_{i}")
         with c3:
-            if prod_idx > 0:
-                st.write(f"**{LBL['unit_price'].format(cur=currency)}**")
-                st.write(fmt_price_it(item["unit_price"]))
+            line_total = item["qty"] * item["unit_price"]
+            st.write(f"**Line Total ({currency})**")
+            st.write(fmt_price_it(line_total))
         with c4:
             st.write("")
             st.write("")
@@ -870,10 +900,11 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
     buffer2 = io.BytesIO()
     with zipfile.ZipFile(buffer, 'r') as zin, zipfile.ZipFile(buffer2, 'w', zipfile.ZIP_DEFLATED) as zout:
         for item_z in zin.infolist():
-            data = zin.read(item_z.name)
-            if item_z.name in ("word/document.xml", "word/header1.xml",
-                                "word/header2.xml", "word/footer1.xml",
-                                "word/footer2.xml"):
+            fname = item_z.filename
+            data = zin.read(fname)
+            if fname in ("word/document.xml", "word/header1.xml",
+                         "word/header2.xml", "word/footer1.xml",
+                         "word/footer2.xml"):
                 data = _inject_bold_in_xml(data, TC_HEADING)
             zout.writestr(item_z, data)
     buffer2.seek(0)
