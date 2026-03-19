@@ -631,20 +631,24 @@ for i, item in enumerate(st.session_state.fattura_line_items):
                 extra = EXTRA_ITEMS[prod_idx - EXTRA_ITEM_OFFSET]
                 st.caption(f"🇬🇧 {extra[0]} / 🇮🇹 {extra[1]}")
 
-            if prod_idx == 0:
-                item["description"] = st.text_input(
-                    "Custom Product Name (EN — shown in English document)",
-                    value=item.get("description", ""),
-                    key=f"fattura_desc_{i}")
-                item["description_it"] = st.text_input(
-                    "Custom Product Name (IT — shown in Italian document)",
-                    value=item.get("description_it", ""),
-                    key=f"fattura_desc_it_{i}")
+           if prod_idx == 0:
+                if is_italian:
+                    item["description_it"] = st.text_input(
+                        "Custom Product Name (IT)",
+                        value=item.get("description_it", ""),
+                        key=f"fattura_desc_it_{i}")
+                else:
+                    item["description"] = st.text_input(
+                        "Custom Product Name (EN)",
+                        value=item.get("description", ""),
+                        key=f"fattura_desc_{i}")
 
-            item["details"] = st.text_input(
-                "Description / Specs EN (optional)", value=item.get("details",""), key=f"fattura_details_{i}")
-            item["details_it"] = st.text_input(
-                "Description / Specs IT (optional)", value=item.get("details_it",""), key=f"fattura_details_it_{i}")
+            if is_italian:
+                item["details_it"] = st.text_input(
+                    "Descrizione / Specifiche IT (optional)", value=item.get("details_it",""), key=f"fattura_details_it_{i}")
+            else:
+                item["details"] = st.text_input(
+                    "Description / Specs EN (optional)", value=item.get("details",""), key=f"fattura_details_{i}")
 
             # Unit price — always editable; pre-filled from DB list price for catalogue items.
             is_catalogue = 0 < prod_idx < EXTRA_ITEM_OFFSET and prod_idx in PRODUCT_MAP
