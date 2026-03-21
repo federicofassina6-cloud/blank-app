@@ -115,6 +115,8 @@ def save_offerta(offerta_number, client_company, total_amount, currency, date_of
         "client_company": client_company,
         "date_of_reference": date_of_reference,
         "payment_terms": payment_terms,
+        "total_amount": total_amount,
+        "currency": currency,
     }
     r = requests.post(
         f"{SUPABASE_URL}/rest/v1/offerte",
@@ -181,7 +183,6 @@ if LANG == "en":
     TEMPLATE_FILE = "offerta_template_eng.docx"
     TITLE         = "📄 Offer Generator 🇬🇧"
     TOTAL_LABEL_TPL = "TOTAL PRICE \u2013 {dt} \u2013"
-    # Heading text exactly as it appears in the English template
     TC_HEADING = "TERMS AND CONDITIONS"
     PAYMENT_OPTIONS = [
         "In advance by T/t transfer",
@@ -224,7 +225,6 @@ if LANG == "en":
         "generate": "📥 Generate Offer",
         "warn_company": "Please enter a company name.",
         "warn_items": "Please add at least one line item.",
-        # Validation for attn field when toggled but name is empty
         "warn_attn": "Please enter the contact's full name. It is required when 'To the attention of' is selected.",
         "success": "✅ Offerta {num} ready! Total: {cur} {total}",
         "download": "📄 Download Word Document",
@@ -241,7 +241,6 @@ else:
     TEMPLATE_FILE = "offerta_template_ita.docx"
     TITLE         = "📄 Generatore Offerta 🇮🇹"
     TOTAL_LABEL_TPL = "TOTALE \u2013 {dt} \u2013"
-    # Heading text exactly as it appears in the Italian template
     TC_HEADING = "CONDIZIONI GENERALI DI VENDITA"
     PAYMENT_OPTIONS = [
         "Anticipato tramite bonifico bancario",
@@ -284,7 +283,6 @@ else:
         "generate": "📥 Genera Offerta",
         "warn_company": "Inserire la ragione sociale.",
         "warn_items": "Aggiungere almeno un articolo.",
-        # Validation for attn field when toggled but name is empty — Italian
         "warn_attn": "Inserisci Nome contatto. È obbligatorio se selezioni 'All'attenzione di'.",
         "success": "✅ Offerta {num} pronta! Totale: {cur} {total}",
         "download": "📄 Scarica documento Word",
@@ -388,13 +386,6 @@ def set_cell_text(cell, text, bold=False, italic=False, font_name="Verdana", fon
     run.font.size = Pt(font_size)
 
 def bold_tc_heading(doc, heading_text):
-    """
-    Scan every paragraph in the document at raw XML level.
-    If the paragraph's full text contains heading_text (case-insensitive),
-    force ALL its runs bold by injecting <w:b/> into their <w:rPr>.
-    Covers body paragraphs, table cells, text boxes, headers, footers.
-    Does NOT consolidate runs — leaves structure intact.
-    """
     heading_upper = heading_text.upper()
 
     def _force_bold_para_xml(p_el):
@@ -590,7 +581,6 @@ for i, item in enumerate(st.session_state.line_items):
                 else:
                     item["description"] = ""
                     item["unit_price"] = item["price_client"] = item["price_reseller"] = 0.0
-                # Drop widget key so number_input reinitialises with new list price
                 st.session_state.pop(f"up_{i}_{prod_idx}", None)
                 needs_rerun = True
 
@@ -611,8 +601,6 @@ for i, item in enumerate(st.session_state.line_items):
             item["details"] = st.text_input(
                 LBL["details"], value=item.get("details", ""), key=f"details_{i}")
 
-            # Editable unit price for catalogue items — key includes prod_idx so it
-            # reinitialises with the DB list price whenever the product changes
             if prod_idx > 0 and prod_idx in PRODUCT_MAP:
                 db_price = item.get("price_client", 0.0) if global_price_type == LBL["cliente"] else item.get("price_reseller", 0.0)
                 item["unit_price"] = st.number_input(
@@ -622,7 +610,6 @@ for i, item in enumerate(st.session_state.line_items):
                     step=0.01, format="%.2f",
                     key=f"up_{i}_{prod_idx}"
                 )
-                # Discount / surcharge indicator
                 if db_price > 0:
                     entered = float(item.get("unit_price", 0.0))
                     if abs(entered - db_price) > 0.001:
@@ -712,12 +699,10 @@ doc_name = st.text_input(LBL["file_name"], value=default_name)
 # ── GENERATE ──────────────────────────────────
 st.divider()
 if st.button(LBL["generate"], type="primary", use_container_width=True, disabled=not number_ok):
-    # ── Validation ────────────────────────────────────────────────────────────
     if not company:
         st.warning(LBL["warn_company"])
         st.stop()
 
-    # If "attn of" is ticked but full name is blank → friendly, specific error
     if include_attn and not full_name.strip():
         st.warning(LBL["warn_attn"])
         st.stop()
@@ -726,7 +711,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         st.warning(LBL["warn_items"])
         st.stop()
 
-    # ── Build document ────────────────────────────────────────────────────────
     zip_city = f"{zip_code} {city}".strip()
     if region:
         zip_city += f", {region}"
@@ -786,7 +770,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
             set_para_run(para, company, bold=True)
             continue
 
-        # Skip T&C heading — preserve template bold exactly as-is
         if TC_HEADING.upper() in para.text.upper():
             continue
 
@@ -795,7 +778,6 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
             run.font.name = "Verdana"
             run.font.size = Pt(10)
 
-    # ── Bold the T&C / Condizioni heading ────────────────────────────────────
     bold_tc_heading(doc, TC_HEADING)
 
     table    = doc.tables[0]
@@ -867,9 +849,16 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
     doc.save(buffer)
     buffer.seek(0)
 
-    save_offerta(proforma_number, company, grand_total, currency,
-                 date_of_reference=selected_date.strftime("%Y-%m-%d"),
-                 payment_terms=payment)
+    # ── Save to Supabase — now includes total_amount and currency ──
+    save_offerta(
+        proforma_number,
+        company,
+        grand_total,
+        currency,
+        date_of_reference=selected_date.strftime("%Y-%m-%d"),
+        payment_terms=payment,
+    )
+
     if company.strip():
         save_customer(company, full_name, salutation, "", "", address, city, zip_code, country, "")
         load_customers.clear()
