@@ -703,7 +703,7 @@ if st.button(LBL["generate"], type="primary", use_container_width=True, disabled
         st.warning(LBL["warn_company"])
         st.stop()
 
-    if include_attn and not full_name.strip():
+    if include_attn and not (full_name or "").strip():
         st.warning(LBL["warn_attn"])
         st.stop()
 
